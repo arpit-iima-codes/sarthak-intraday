@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Controls · Sarthak Intraday{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-head">
+    <span class="eyebrow">Scanner Controls</span>
+    <h1>Universe</h1>
+    <p class="sub">Symbols the scanner tracks each day. Comma or newline separated.
+       Bare names are treated as NSE equity (<code>SBIN</code> → <code>NSE:SBIN-EQ</code>);
+       for anything else give the full Fyers symbol
+       (<code>NSE:NIFTY50-INDEX</code>, <code>MCX:GOLD25DECFUT</code>).</p>
+  </div>
+
+  <form method="post" action="/controls/universe" class="form">
+    <div class="field">
+      <label for="universe">Symbols ({{ universe|length }} saved)</label>
+      <textarea id="universe" name="universe" rows="6" spellcheck="false"
+                placeholder="SBIN, RELIANCE, TCS, NSE:NIFTY50-INDEX">{{ universe_raw }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary btn-block">Validate &amp; Save</button>
+  </form>
+
+  {% if results %}
+    <div class="valresults">
+      <h2>Validation</h2>
+      <ul class="vallist">
+        {% for r in results %}
+          <li class="{{ 'ok' if r.ok else 'bad' }}">
+            <span class="vmark">{{ '✓' if r.ok else '✕' }}</span>
+            <span class="mono vsym">{{ r.symbol }}</span>
+            {% if r.ok %}
+              <span class="vdim">{{ r.name }}{% if r.ltp is not none %} · ₹{{ r.ltp }}{% endif %}</span>
+            {% else %}
+              <span class="vdim">{{ r.reason }}</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="hint">Only valid symbols are saved. Fix the rejected ones and save again.</p>
+    </div>
+  {% endif %}
+</div>
+
+<div class="card card-muted">
+  <h2>More controls</h2>
+  <p>Additional scanner settings will be added here.</p>
+</div>
+{% endblock %}

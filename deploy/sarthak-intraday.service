@@ -9,9 +9,10 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/sarthak-intraday
 Environment=HOST=127.0.0.1
 Environment=PORT=8092
+# One worker only: the scanner runs a background websocket + threads in-process.
 ExecStart=/home/ubuntu/sarthak-intraday/.venv/bin/uvicorn app.main:app \
-    --host 127.0.0.1 --port 8092 --workers 2 --proxy-headers \
-    --forwarded-allow-ips 127.0.0.1
+    --host 127.0.0.1 --port 8092 --workers 1 --proxy-headers \
+    --forwarded-allow-ips 127.0.0.1 --timeout-graceful-shutdown 5
 Restart=on-failure
 RestartSec=3
 

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Scanner · Sarthak Intraday{% endblock %}
+{% block wrap_class %}wrap-wide{% endblock %}
+
+{% block content %}
+<div class="scanner-bar">
+  <div class="sb-left">
+    <span class="sb-clock" id="clock">--:--:--</span>
+    <span class="sb-sep">·</span>
+    <span id="daylabel" class="sb-dim">--</span>
+  </div>
+  <div class="sb-right">
+    <span id="freeze" class="chip chip-dim">static: forming</span>
+    <span id="sockpill" class="chip">socket: —</span>
+  </div>
+</div>
+
+<div id="empty" class="card card-muted" hidden>
+  <h2>No symbols yet</h2>
+  <p>Add a universe on the <a href="/controls">Controls</a> page. The scanner
+     starts tracking them from market open and freezes the static section at
+     <strong id="freezetime">10:00</strong>.</p>
+</div>
+
+<div id="tablewrap" class="table-wrap" hidden>
+  <table class="scan-table">
+    <thead>
+      <tr class="grp">
+        <th></th>
+        <th colspan="6" class="grp-static">Static — frozen at <span class="ft">10:00</span></th>
+        <th colspan="2" class="grp-live">Live</th>
+      </tr>
+      <tr>
+        <th data-k="symbol" class="col-sym">Symbol</th>
+        <th data-k="yclose" class="num">Y.Close</th>
+        <th data-k="s_open" class="num">Open</th>
+        <th data-k="s_high" class="num">High</th>
+        <th data-k="s_low" class="num">Low</th>
+        <th data-k="s_ltp" class="num">LTP</th>
+        <th data-k="s_pct" class="num">% ↑ close</th>
+        <th data-k="ltp" class="num live">LTP</th>
+        <th data-k="live_pct" class="num live">% ↑ 10:00 high</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/scanner.js"></script>
+{% endblock %}

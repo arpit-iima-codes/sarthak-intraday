@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import secrets
+from datetime import time as dtime
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+IST = ZoneInfo("Asia/Kolkata")
+
+# Scanner timing (IST)
+MARKET_OPEN = dtime(9, 15)
+FREEZE_TIME = dtime(10, 0)     # static section is frozen at this time
+MARKET_CLOSE = dtime(15, 30)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -64,3 +73,4 @@ def get_settings() -> Settings:
 
 SESSION_SECRET = _load_or_create_secret()
 SESSION_FILE = DATA_DIR / "broker_session.json"
+CONTROLS_FILE = DATA_DIR / "controls.json"

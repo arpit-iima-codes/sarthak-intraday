@@ -1,28 +1,39 @@
-"""sarthak-intraday — Fyers login (OAuth) + broker connection.
+"""sarthak-intraday — Fyers connection, live scanner, controls.
 
-Screener and order terminal come later; this establishes the FastAPI app and
-the Fyers connection they will build on.
-
-  GET  /                 login page (redirects to /dashboard when connected)
-  GET  /login            start the Fyers OAuth flow (redirect to Fyers)
-  GET  /fyers/callback   OAuth redirect target — exchanges the code for a token
-  POST /logout           drop the stored session
-  GET  /dashboard        connected landing page (placeholder)
-  GET  /health           json status
-  GET  /api/session      json view of the current broker session (no token)
+  GET  /                    login page (redirects to /dashboard when connected)
+  GET  /login               start the Fyers OAuth flow
+  GET  /fyers/callback      OAuth redirect target
+  POST /logout              drop the stored session
+  GET  /dashboard           connected landing page
+  GET  /scanner             daily live scanner
+  GET  /controls            scanner controls (symbol universe, ...)
+  POST /controls/universe   validate + save the universe
+  GET  /api/scanner/state   one-shot scanner snapshot (JSON)
+  GET  /api/scanner/stream  scanner snapshot stream (SSE, ~1s)
+  GET  /health              json status
+  GET  /api/session         json view of the current broker session
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import secrets
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import controls
 from . import session as broker_session
 from .config import SESSION_SECRET, get_settings
 from .fyers import (
@@ -34,10 +45,22 @@ from .fyers import (
     fetch_profile,
     token_is_valid,
 )
+from .marketdata import MarketDataError
+from .scanner import scanner
 
 BASE = Path(__file__).resolve().parent
 
-app = FastAPI(title="sarthak-intraday", docs_url=None, redoc_url=None)
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI):
+    scanner.start()
+    try:
+        yield
+    finally:
+        scanner.stop()
+
+
+app = FastAPI(title="sarthak-intraday", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
@@ -51,6 +74,13 @@ def app_config() -> AppConfig:
         secret_key=s.fyers_secret_key,
         redirect_uri=s.redirect_uri,
     )
+
+
+def broker_auth() -> str | None:
+    data = broker_session.load()
+    if not data or not data.get("access_token"):
+        return None
+    return f"{data['client_id']}:{data['access_token']}"
 
 
 async def active_session() -> dict | None:
@@ -71,6 +101,13 @@ def _take_flashes(request: Request) -> list[dict]:
     return request.session.pop("_flash", [])
 
 
+def _ctx(request: Request, **extra) -> dict:
+    return {"flashes": _take_flashes(request), "nav": request.url.path, **extra}
+
+
+# --------------------------------------------------------------------------- #
+# auth
+# --------------------------------------------------------------------------- #
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     if request.session.get("authed") and await active_session():
@@ -80,12 +117,8 @@ async def index(request: Request):
     return templates.TemplateResponse(
         request,
         "login.html",
-        {
-            "creds_ready": s.creds_ready,
-            "fy_id": s.fyers_fy_id,
-            "redirect_uri": s.redirect_uri,
-            "flashes": _take_flashes(request),
-        },
+        _ctx(request, creds_ready=s.creds_ready, fy_id=s.fyers_fy_id,
+             redirect_uri=s.redirect_uri),
     )
 
 
@@ -127,6 +160,7 @@ async def fyers_callback(request: Request):
 
     record = broker_session.save(result)
     request.session["authed"] = True
+    scanner.reload_universe()
     name = (record.get("profile") or {}).get("name") or record.get("fy_id") or "your account"
     _flash(request, f"Connected to Fyers as {name}.", "success")
     return RedirectResponse("/dashboard", status_code=303)
@@ -148,7 +182,6 @@ async def dashboard(request: Request):
         _flash(request, "Not connected. Please sign in.")
         return RedirectResponse("/", status_code=303)
 
-    # refresh funds + profile live for display
     try:
         funds = await fetch_funds(data["client_id"], data["access_token"])
         profile = await fetch_profile(data["client_id"], data["access_token"])
@@ -157,26 +190,124 @@ async def dashboard(request: Request):
         profile = data.get("profile") or {}
 
     return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "data": data,
-            "profile": profile,
-            "funds": funds,
-            "flashes": _take_flashes(request),
-        },
+        request, "dashboard.html",
+        _ctx(request, data=data, profile=profile, funds=funds),
     )
 
 
+# --------------------------------------------------------------------------- #
+# scanner
+# --------------------------------------------------------------------------- #
+@app.get("/scanner", response_class=HTMLResponse)
+async def scanner_page(request: Request):
+    data = await active_session()
+    if not data:
+        request.session.clear()
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        request, "scanner.html",
+        _ctx(request, universe_count=len(controls.load().get("universe", []))),
+    )
+
+
+@app.get("/api/scanner/state")
+async def scanner_state():
+    return scanner.snapshot()
+
+
+@app.get("/api/scanner/stream")
+async def scanner_stream(request: Request):
+    async def gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                payload = json.dumps(scanner.snapshot(), default=str)
+                yield f"data: {payload}\n\n"
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:  # client went away
+            raise
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# --------------------------------------------------------------------------- #
+# controls
+# --------------------------------------------------------------------------- #
+@app.get("/controls", response_class=HTMLResponse)
+async def controls_page(request: Request):
+    data = await active_session()
+    if not data:
+        request.session.clear()
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+
+    cfg = controls.load()
+    raw = cfg.get("universe_raw") or ", ".join(cfg.get("universe", []))
+    return templates.TemplateResponse(
+        request, "controls.html",
+        _ctx(request, universe_raw=raw, universe=cfg.get("universe", []),
+             results=request.session.pop("_validation", None)),
+    )
+
+
+@app.post("/controls/universe")
+async def save_universe(request: Request, universe: str = Form("")):
+    if not await active_session():
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+
+    auth = broker_auth()
+    symbols = controls.parse_universe(universe)
+    if not symbols:
+        controls.save({"universe": [], "universe_raw": universe})
+        scanner.reload_universe()
+        _flash(request, "Universe cleared.", "success")
+        return RedirectResponse("/controls", status_code=303)
+
+    try:
+        results = controls.validate(auth, symbols)
+    except MarketDataError as exc:
+        _flash(request, f"Validation failed: {exc}")
+        return RedirectResponse("/controls", status_code=303)
+
+    valid = [r["symbol"] for r in results if r["ok"]]
+    controls.save({"universe": valid, "universe_raw": universe})
+    scanner.reload_universe()
+
+    request.session["_validation"] = results
+    bad = len(results) - len(valid)
+    if bad:
+        _flash(request, f"Saved {len(valid)} symbol(s); {bad} rejected — see below.",
+               "error" if not valid else "success")
+    else:
+        _flash(request, f"All {len(valid)} symbol(s) valid and saved.", "success")
+    return RedirectResponse("/controls", status_code=303)
+
+
+# --------------------------------------------------------------------------- #
+# misc
+# --------------------------------------------------------------------------- #
 @app.get("/health")
 async def health():
     s = get_settings()
     data = broker_session.load()
+    snap = scanner.snapshot()
     return {
         "app": "sarthak-intraday",
         "creds_configured": s.creds_ready,
         "broker_connected": bool(data),
         "connected_at": (data or {}).get("connected_at"),
+        "scanner": {
+            "universe": snap["universe_count"],
+            "socket": snap["socket"]["status"],
+            "frozen": snap["frozen"],
+        },
     }
 
 

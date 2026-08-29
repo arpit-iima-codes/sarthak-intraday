@@ -18,7 +18,15 @@
         <span class="crest">✦</span>
         <span class="brand-text">Sarthak <span class="brand-sub">Intraday</span></span>
       </a>
+      {% if nav and nav != "/" %}
+      <nav class="mainnav">
+        <a href="/dashboard" class="{{ 'active' if nav == '/dashboard' }}">Dashboard</a>
+        <a href="/scanner" class="{{ 'active' if nav == '/scanner' }}">Scanner</a>
+        <a href="/controls" class="{{ 'active' if nav == '/controls' }}">Controls</a>
+      </nav>
+      {% else %}
       <span class="tag">Screener &amp; Trading Terminal</span>
+      {% endif %}
       {% block topbar_right %}{% endblock %}
     </div>
   </header>
@@ -39,5 +47,6 @@
     <span>Sarthak Intraday</span>
     <span class="rule"></span>
   </footer>
+  {% block scripts %}{% endblock %}
 </body>
 </html>
