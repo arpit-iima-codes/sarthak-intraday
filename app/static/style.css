@@ -732,3 +732,40 @@ textarea:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px
 .vallist li.bad .vmark { color: var(--err); }
 .vsym { color: var(--ink); }
 .vdim { color: var(--ink-faint); }
+
+/* ======================== mobile ======================== */
+@media (max-width: 600px) {
+  .topbar-inner {
+    padding: 10px 14px;
+    gap: 8px 10px;
+    flex-wrap: wrap;
+  }
+  .brand-text { font-size: 17px; white-space: nowrap; }
+  .crest { font-size: 15px; }
+  .tag { display: none; }
+
+  .mainnav {
+    order: 3;
+    width: 100%;
+    gap: 6px;
+  }
+  .mainnav a { flex: 1; text-align: center; padding: 7px 8px; font-size: 12.5px; }
+  .topbar-right { order: 2; gap: 8px; }
+  .btn-sm { padding: 7px 11px; }
+  .theme-toggle { width: 30px; height: 30px; font-size: 13px; }
+
+  .wrap { padding: 18px 14px; }
+  .wrap-scanner { padding: 14px 12px; }
+  .card { padding: 22px 18px; }
+
+  .scanner-bar { padding: 10px 12px; margin-bottom: 10px; }
+  .sb-clock { font-size: 16px; }
+  .chip { font-size: 11px; padding: 4px 9px; }
+
+  .scan-split { height: auto; min-height: 0; }
+  .scan-pane .table-wrap { max-height: 66vh; }
+  .pos-tablewrap { max-height: none; }
+
+  .stat-val { font-size: 17px; }
+  .pos-stats .stat { padding: 12px 14px; }
+}
