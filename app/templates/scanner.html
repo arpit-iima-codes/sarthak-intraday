@@ -1,37 +1,81 @@
 {% extends "base.html" %}
 {% block title %}Scanner · Sarthak Intraday{% endblock %}
-{% block wrap_class %}wrap-wide{% endblock %}
+{% block wrap_class %}wrap-wide wrap-scanner{% endblock %}
 
 {% block content %}
-<div class="scanner-bar">
-  <div class="sb-left">
-    <span class="sb-clock" id="clock">--:--:--</span>
-    <span class="sb-sep">·</span>
-    <span id="daylabel" class="sb-dim">--</span>
-  </div>
-  <div class="sb-right">
-    <button id="resetcols" class="linkbtn" type="button" title="Reset column order">↺ layout</button>
-    <span id="freeze" class="chip chip-dim">static: forming</span>
-    <span id="sockpill" class="chip">socket: —</span>
-  </div>
-</div>
+<div class="scan-split">
 
-<div id="empty" class="card card-muted" hidden>
-  <h2>No symbols yet</h2>
-  <p>Add a universe on the <a href="/controls">Controls</a> page. The scanner
-     starts tracking them from market open and freezes the static section at
-     <strong id="freezetime">10:00</strong>.</p>
-</div>
+  <!-- ---------------- left: live scanner ---------------- -->
+  <section class="scan-pane">
+    <div class="scanner-bar">
+      <div class="sb-left">
+        <span class="sb-clock" id="clock">--:--:--</span>
+        <span class="sb-sep">·</span>
+        <span id="daylabel" class="sb-dim">--</span>
+      </div>
+      <div class="sb-right">
+        <button id="resetcols" class="linkbtn" type="button" title="Reset column order">↺ layout</button>
+        <span id="freeze" class="chip chip-dim">static: forming</span>
+        <span id="sockpill" class="chip">socket: —</span>
+      </div>
+    </div>
 
-<div id="tablewrap" class="table-wrap" hidden>
-  <p class="table-hint">Drag column headers to reorder · click to sort</p>
-  <table class="scan-table">
-    <thead id="thead"></thead>
-    <tbody id="rows"></tbody>
-  </table>
+    <div id="empty" class="card card-muted" hidden>
+      <h2>No symbols yet</h2>
+      <p>Add a universe on the <a href="/controls">Controls</a> page. The scanner
+         starts tracking them from market open and freezes the static section at
+         <strong id="freezetime">10:00</strong>.</p>
+    </div>
+
+    <div id="tablewrap" class="table-wrap" hidden>
+      <p class="table-hint">Drag column headers to reorder · click to sort</p>
+      <table class="scan-table">
+        <thead id="thead"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ---------------- right: day positions ---------------- -->
+  <aside class="pos-pane">
+    <div class="pos-stats">
+      <div class="stat">
+        <span class="stat-label">Live P&amp;L</span>
+        <span class="stat-val" id="pos-pnl">—</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Available Balance</span>
+        <span class="stat-val" id="pos-bal">—</span>
+      </div>
+    </div>
+
+    <div class="pos-head">
+      <span class="eyebrow">Today's Positions</span>
+      <span class="pos-err" id="pos-err" hidden></span>
+    </div>
+
+    <div class="pos-tablewrap">
+      <table class="pos-table">
+        <thead>
+          <tr>
+            <th class="col-sym">Symbol</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Target</th>
+            <th>SL</th>
+            <th>PnL</th>
+          </tr>
+        </thead>
+        <tbody id="pos-rows"></tbody>
+      </table>
+      <p class="pos-empty" id="pos-empty" hidden>No open positions today.</p>
+    </div>
+  </aside>
+
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/scanner.js"></script>
+<script src="/static/positions.js"></script>
 {% endblock %}

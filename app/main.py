@@ -10,6 +10,7 @@
   POST /controls/freeze-time  set the static-section freeze time (IST)
   GET  /api/scanner/state   one-shot scanner snapshot (JSON)
   GET  /api/scanner/stream  scanner snapshot stream (SSE, ~1s)
+  GET  /api/positions/state day positions + live P&L + available balance (JSON)
   GET  /health              json status
   GET  /api/session         json view of the current broker session
 """
@@ -48,6 +49,7 @@ from .fyers import (
 )
 from .marketdata import MarketDataError
 from .scanner import scanner
+from . import positions as positions_svc
 
 BASE = Path(__file__).resolve().parent
 
@@ -219,6 +221,19 @@ async def scanner_stream(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/api/positions/state")
+async def positions_state():
+    # Light check only — this is polled every few seconds, so don't spend a
+    # /profile round-trip per call. A stale token surfaces as `error` below.
+    data = broker_session.load()
+    if not data or not data.get("access_token"):
+        return JSONResponse(
+            {"connected": False, "error": None, "positions": [],
+             "pnl": None, "available_balance": None},
+        )
+    return await positions_svc.snapshot(data["client_id"], data["access_token"])
 
 
 # --------------------------------------------------------------------------- #
