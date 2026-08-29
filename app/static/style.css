@@ -572,10 +572,11 @@ code {
   background: #141416;
 }
 .stat-label {
-  font-size: 10.5px;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--ink-faint);
+  color: var(--ink-dim);
 }
 .stat-val {
   font-family: var(--mono);
