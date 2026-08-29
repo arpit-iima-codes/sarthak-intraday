@@ -21,6 +21,10 @@
 
   const pctClass = (v) => (v === null || v === undefined ? "" : v > 0 ? "up" : v < 0 ? "down" : "");
 
+  // "NSE:SBIN-EQ" -> "SBIN", "NSE:NIFTY50-INDEX" -> "NIFTY50"
+  const disp = (sym) =>
+    String(sym).replace(/^[A-Z]+:/, "").replace(/-(EQ|INDEX)$/, "");
+
   const ago = (s) => {
     if (s === null || s === undefined) return "";
     if (s < 60) return s + "s ago";
@@ -77,7 +81,7 @@
 
     rows.sort((a, b) => {
       let x = a[sortKey], y = b[sortKey];
-      if (sortKey === "symbol") return sortDir * String(x).localeCompare(String(y));
+      if (sortKey === "symbol") return sortDir * disp(x).localeCompare(disp(y));
       x = x === null || x === undefined ? -Infinity : x;
       y = y === null || y === undefined ? -Infinity : y;
       return sortDir * (x - y);
@@ -86,7 +90,7 @@
     rowsEl.innerHTML = rows
       .map(
         (r) => `<tr>
-        <td class="col-sym">${r.symbol}</td>
+        <td class="col-sym" title="${r.symbol}">${disp(r.symbol)}</td>
         <td class="num">${num(r.yclose)}</td>
         <td class="num">${num(r.s_open)}</td>
         <td class="num">${num(r.s_high)}</td>
