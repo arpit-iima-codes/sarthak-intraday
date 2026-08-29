@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from datetime import time as time_cls
 
 from fyers_apiv3.FyersWebsocket import data_ws
@@ -79,6 +79,7 @@ class ScannerService:
         self.freeze_time: time_cls = FREEZE_TIME
         self.day: date | None = None
         self.frozen_at: datetime | None = None
+        self._need_refreeze = False       # freeze time moved into the past
         self._last_seed = 0.0
 
         self._sock: data_ws.FyersDataSocket | None = None
@@ -123,7 +124,12 @@ class ScannerService:
                     self.rows.pop(sym, None)
             if new_freeze != self.freeze_time:
                 self.freeze_time = new_freeze
-                self.frozen_at = None      # re-capture at / for the new time
+                if datetime.now(IST).time() < new_freeze:
+                    self.frozen_at = None       # forming again until the new time
+                    self._need_refreeze = False
+                else:
+                    self._need_refreeze = True   # re-capture from history, keep
+                    #                              the current snapshot until then
                 log.info("freeze time set to %s", new_freeze.strftime("%H:%M"))
         self._sync_subscription()
         log.info("controls reloaded: %d symbols", len(self.universe))
@@ -152,14 +158,10 @@ class ScannerService:
             self._stop.wait(3)
 
     def _forming(self) -> bool:
-        """True only while the static section is legitimately still accumulating
-        (not frozen, and the clock has not yet reached the freeze time). Once
-        the freeze time has passed the static columns wait for the history
-        snapshot in _maybe_freeze — they never take live ticks."""
-        return (
-            self.frozen_at is None
-            and datetime.now(IST).time() < self.freeze_time
-        )
+        """True while the static section still accumulates from quotes/ticks.
+        Once frozen (frozen_at set) the static columns are locked to the
+        1-minute-history snapshot and never take live ticks again."""
+        return self.frozen_at is None
 
     def _ensure_day(self) -> None:
         today = datetime.now(IST).date()
@@ -214,7 +216,7 @@ class ScannerService:
     def _maybe_freeze(self) -> None:
         now = datetime.now(IST)
         freeze_time = self.freeze_time
-        if self.frozen_at is not None:
+        if self.frozen_at is not None and not self._need_refreeze:
             return
         if now.weekday() >= 5 or now.time() < freeze_time:
             return
@@ -228,9 +230,6 @@ class ScannerService:
         cutoff = int(
             datetime.combine(self.day, freeze_time, tzinfo=IST).timestamp()
         )
-        grace_end = (
-            datetime.combine(self.day, freeze_time) + timedelta(minutes=15)
-        ).time()
 
         computed: dict[str, tuple] = {}
         for sym in symbols:
@@ -250,9 +249,12 @@ class ScannerService:
                 computed[sym] = (o, h, low, close)
             time.sleep(HISTORY_THROTTLE)
 
-        # give the history feed a few minutes of grace before locking in a
-        # blank snapshot (covers a slow feed / market holiday ambiguity)
-        if not computed and now.time() < grace_end:
+        # No pre-freeze candles for anything -> not a real trading session
+        # (market holiday, or history not available yet). Don't freeze; stay
+        # in "forming" mode showing the last quotes and retry next tick.
+        if not computed:
+            log.info("freeze skipped - no 1-minute history before %s",
+                     freeze_time.strftime("%H:%M"))
             return
 
         with self._lock:
@@ -262,6 +264,7 @@ class ScannerService:
                 row.s_pct = _pct(row.s_ltp, row.yclose)
                 row.live_pct = _pct(row.ltp, row.s_high)
             self.frozen_at = datetime.now(IST)
+            self._need_refreeze = False
         log.info(
             "static section frozen at %s (%d/%d from history)",
             self.frozen_at.strftime("%H:%M:%S"), len(computed), len(symbols),
