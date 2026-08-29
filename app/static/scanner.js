@@ -207,12 +207,22 @@
     $("freezetime") && ($("freezetime").textContent = s.freeze_time);
 
     const fz = $("freeze");
+    const sess = s.data_date
+      ? new Date(s.data_date + "T00:00:00").toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+        })
+      : null;
     if (s.frozen) {
       const t = s.frozen_at ? new Date(s.frozen_at).toLocaleTimeString("en-GB") : "";
-      fz.textContent = "static: frozen " + t;
+      fz.textContent = "static: " + (sess ? sess + " session · " : "") + "frozen " + t;
       fz.className = "chip chip-ok";
+    } else if (sess && s.data_stale) {
+      fz.textContent = "static: " + sess + " session · forms " + s.freeze_time;
+      fz.className = "chip chip-warn";
     } else {
-      fz.textContent = "static: forming until " + s.freeze_time;
+      fz.textContent =
+        "static: " + (sess ? sess + " · " : "") + "forming until " + s.freeze_time;
       fz.className = "chip chip-dim";
     }
 

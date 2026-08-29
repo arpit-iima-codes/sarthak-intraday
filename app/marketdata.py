@@ -8,7 +8,7 @@ history). The live feed is a websocket, handled in scanner.py.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import httpx
 
@@ -55,6 +55,31 @@ def quotes(auth: str, symbols: list[str]) -> dict[str, dict]:
     for s in symbols:
         out.setdefault(s, {"error": "no data returned"})
     return out
+
+
+def last_trading_date(auth: str, symbol: str, tz) -> date | None:
+    """Date of the most recent daily candle — i.e. the last session with data."""
+    today = datetime.now(tz).date()
+    with httpx.Client(timeout=TIMEOUT, headers={"Authorization": auth}) as client:
+        try:
+            resp = client.get(
+                f"{BASE}/data/history",
+                params={
+                    "symbol": symbol,
+                    "resolution": "D",
+                    "date_format": "1",
+                    "range_from": (today - timedelta(days=12)).isoformat(),
+                    "range_to": today.isoformat(),
+                    "cont_flag": "1",
+                },
+            )
+            body = resp.json()
+        except (httpx.HTTPError, ValueError):
+            return None
+    candles = body.get("candles") or []
+    if not candles:
+        return None
+    return datetime.fromtimestamp(candles[-1][0], tz).date()
 
 
 def history_1m(auth: str, symbol: str, day: date) -> list[list]:

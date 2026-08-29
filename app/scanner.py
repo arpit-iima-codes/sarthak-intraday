@@ -81,6 +81,9 @@ class ScannerService:
         self.frozen_at: datetime | None = None
         self._need_refreeze = False       # freeze time moved into the past
         self._last_seed = 0.0
+        self._data_epoch = 0.0            # last-trade time seen in quotes/ticks
+        self._session_date: date | None = None   # last session with data
+        self._session_checked = 0.0
 
         self._sock: data_ws.FyersDataSocket | None = None
         self._subscribed: set[str] = set()
@@ -171,6 +174,9 @@ class ScannerService:
             self.day = today
             self.frozen_at = None
             self._last_seed = 0.0
+            self._data_epoch = 0.0
+            self._session_date = None
+            self._session_checked = 0.0
             self.rows = {sym: Row(sym) for sym in self.universe}
         log.info("new trading day %s - state reset", today)
 
@@ -197,6 +203,24 @@ class ScannerService:
             log.warning("seed quotes failed: %s", exc)
             return
         self._last_seed = now
+        epochs = [
+            int(v["tt"])
+            for v in quotes.values()
+            if str(v.get("tt", "")).strip().isdigit()
+        ]
+        if epochs:
+            self._data_epoch = max(self._data_epoch, max(epochs))
+
+        # which session the quote data belongs to (last daily candle)
+        if (
+            self.frozen_at is None
+            and self.rows
+            and now - self._session_checked > 600
+        ):
+            sd = marketdata.last_trading_date(auth, next(iter(self.rows)), IST)
+            if sd:
+                self._session_date = sd
+            self._session_checked = now
         with self._lock:
             for sym, v in quotes.items():
                 row = self.rows.get(sym)
@@ -422,9 +446,20 @@ class ScannerService:
         last_msg = (
             round(time.time() - self.sock_last_msg) if self.sock_last_msg else None
         )
+        # which session the static columns represent
+        if self.frozen_at is not None:
+            data_date = self.day.isoformat() if self.day else None
+        elif self._session_date:
+            data_date = self._session_date.isoformat()
+        elif self._data_epoch:
+            data_date = datetime.fromtimestamp(self._data_epoch, IST).date().isoformat()
+        else:
+            data_date = None
         return {
             "server_time": now.isoformat(),
             "day": self.day.isoformat() if self.day else None,
+            "data_date": data_date,
+            "data_stale": bool(data_date and self.day and data_date != self.day.isoformat()),
             "freeze_time": self.freeze_time.strftime("%H:%M"),
             "frozen": self.frozen_at is not None,
             "frozen_at": self.frozen_at.isoformat() if self.frozen_at else None,
