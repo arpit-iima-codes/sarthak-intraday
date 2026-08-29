@@ -10,6 +10,7 @@
     <span id="daylabel" class="sb-dim">--</span>
   </div>
   <div class="sb-right">
+    <button id="resetcols" class="linkbtn" type="button" title="Reset column order">↺ layout</button>
     <span id="freeze" class="chip chip-dim">static: forming</span>
     <span id="sockpill" class="chip">socket: —</span>
   </div>
@@ -23,25 +24,9 @@
 </div>
 
 <div id="tablewrap" class="table-wrap" hidden>
+  <p class="table-hint">Drag column headers to reorder · click to sort</p>
   <table class="scan-table">
-    <thead>
-      <tr class="grp">
-        <th></th>
-        <th colspan="6" class="grp-static">Static — frozen at <span class="ft">10:00</span></th>
-        <th colspan="2" class="grp-live">Live</th>
-      </tr>
-      <tr>
-        <th data-k="symbol" class="col-sym">Symbol</th>
-        <th data-k="yclose" class="num">Y.Close</th>
-        <th data-k="s_open" class="num">Open</th>
-        <th data-k="s_high" class="num">High</th>
-        <th data-k="s_low" class="num">Low</th>
-        <th data-k="s_ltp" class="num">LTP</th>
-        <th data-k="s_pct" class="num">% ↑ close</th>
-        <th data-k="ltp" class="num live">LTP</th>
-        <th data-k="live_pct" class="num live">% ↑ 10:00 high</th>
-      </tr>
-    </thead>
+    <thead id="thead"></thead>
     <tbody id="rows"></tbody>
   </table>
 </div>

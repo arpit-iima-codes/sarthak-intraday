@@ -2,29 +2,62 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  const theadEl = $("thead");
   const rowsEl = $("rows");
   const tableWrap = $("tablewrap");
   const emptyEl = $("empty");
 
-  let latest = null;            // last snapshot
-  let sortKey = "live_pct";
-  let sortDir = -1;             // 1 asc, -1 desc
-  let clockBase = null;         // {serverMs, localMs}
+  // --- columns ---------------------------------------------------------
+  const COLS = [
+    { k: "symbol",   label: "Symbol",         grp: "",       cls: "col-sym" },
+    { k: "yclose",   label: "Y.Close",        grp: "static", cls: "num" },
+    { k: "s_open",   label: "Open",           grp: "static", cls: "num" },
+    { k: "s_high",   label: "High",           grp: "static", cls: "num" },
+    { k: "s_low",    label: "Low",            grp: "static", cls: "num" },
+    { k: "s_ltp",    label: "LTP",            grp: "static", cls: "num" },
+    { k: "s_pct",    label: "% ↑ close", grp: "static", cls: "num pct" },
+    { k: "ltp",      label: "LTP",            grp: "live",   cls: "num live" },
+    { k: "live_pct", label: "% ↑ 10:00 high", grp: "live", cls: "num live pct" },
+  ];
+  const BY_KEY = Object.fromEntries(COLS.map((c) => [c.k, c]));
+  const ALL_KEYS = COLS.map((c) => c.k);
+  const LS_KEY = "scanner.colorder.v2";
 
-  // ---- formatting -------------------------------------------------------
+  function loadOrder() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LS_KEY));
+      if (Array.isArray(s)) {
+        const kept = s.filter((k) => BY_KEY[k]);
+        for (const k of ALL_KEYS) if (!kept.includes(k)) kept.push(k);
+        return kept;
+      }
+    } catch {}
+    return ALL_KEYS.slice();
+  }
+  function saveOrder() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(order));
+    } catch {}
+  }
+
+  let order = loadOrder();
+  const cols = () => order.map((k) => BY_KEY[k]);
+
+  let latest = null;
+  let sortKey = "live_pct";
+  let sortDir = -1;
+  let clockBase = null;
+  let dragging = false;
+  let freezeLabel = "10:00";
+
+  // --- formatting -----------------------------------------------------
   const num = (v, d = 2) =>
     v === null || v === undefined || Number.isNaN(v)
       ? "—"
       : Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
-
   const pct = (v) => (v === null || v === undefined ? "—" : (v > 0 ? "+" : "") + num(v) + "%");
-
   const pctClass = (v) => (v === null || v === undefined ? "" : v > 0 ? "up" : v < 0 ? "down" : "");
-
-  // "NSE:SBIN-EQ" -> "SBIN", "NSE:NIFTY50-INDEX" -> "NIFTY50"
-  const disp = (sym) =>
-    String(sym).replace(/^[A-Z]+:/, "").replace(/-(EQ|INDEX)$/, "");
-
+  const disp = (sym) => String(sym).replace(/^[A-Z]+:/, "").replace(/-(EQ|INDEX)$/, "");
   const ago = (s) => {
     if (s === null || s === undefined) return "";
     if (s < 60) return s + "s ago";
@@ -32,48 +65,95 @@
     return Math.floor(s / 3600) + "h ago";
   };
 
-  // ---- socket pill -----------------------------------------------------
-  const SOCK = {
-    connected: ["ok", "connected"],
-    connecting: ["warn", "connecting…"],
-    disconnected: ["bad", "disconnected"],
-    stale: ["warn", "feed stalled"],
-    error: ["bad", "error"],
-    "no-credentials": ["bad", "no broker session"],
-    idle: ["dim", "idle (market closed)"],
-  };
+  // --- header --------------------------------------------------------
+  const GRP_LABEL = () => ({
+    static: "Static — frozen at " + freezeLabel,
+    live: "Live",
+  });
 
-  function renderStatus(s) {
-    $("clock");
-    if (s.day) $("daylabel").textContent = s.day;
-    $("freezetime") && ($("freezetime").textContent = s.freeze_time);
-    document.querySelectorAll(".ft").forEach((e) => (e.textContent = s.freeze_time));
+  function renderHeader() {
+    const cs = cols();
 
-    const fz = $("freeze");
-    if (s.frozen) {
-      const t = s.frozen_at ? new Date(s.frozen_at).toLocaleTimeString("en-GB") : "";
-      fz.textContent = "static: frozen " + t;
-      fz.className = "chip chip-ok";
-    } else {
-      fz.textContent = "static: forming until " + s.freeze_time;
-      fz.className = "chip chip-dim";
+    // group row: coalesce consecutive same-group columns
+    let groupRow = "<tr class='grp'>";
+    let i = 0;
+    while (i < cs.length) {
+      const g = cs[i].grp;
+      let span = 1;
+      while (i + span < cs.length && cs[i + span].grp === g) span++;
+      const label = g ? GRP_LABEL()[g] : "";
+      groupRow += `<th colspan="${span}" class="grp-${g || "none"}">${label}</th>`;
+      i += span;
     }
+    groupRow += "</tr>";
 
-    const sk = s.socket || {};
-    const [cls, label] = SOCK[sk.status] || ["dim", sk.status || "—"];
-    const pill = $("sockpill");
-    let txt = "socket: " + label;
-    if (sk.status === "connected" && sk.last_msg_seconds != null)
-      txt += " · tick " + ago(sk.last_msg_seconds);
-    else if (["disconnected", "stale", "error"].includes(sk.status))
-      txt += " · " + ago(sk.for_seconds);
-    pill.textContent = txt;
-    pill.className = "chip chip-" + cls;
+    const headRow =
+      "<tr>" +
+      cs
+        .map((c) => {
+          const sorted = c.k === sortKey ? " sorted" : "";
+          const dir = c.k === sortKey ? (sortDir === 1 ? "asc" : "desc") : "";
+          return `<th draggable="true" data-k="${c.k}" data-dir="${dir}"
+                    class="${c.cls}${sorted}">${c.label}</th>`;
+        })
+        .join("") +
+      "</tr>";
+
+    theadEl.innerHTML = groupRow + headRow;
+    bindHeader();
   }
 
-  // ---- table ----------------------------------------------------------
-  function renderRows(s) {
-    const rows = s.rows || [];
+  function bindHeader() {
+    theadEl.querySelectorAll("th[data-k]").forEach((th) => {
+      const key = th.dataset.k;
+
+      th.addEventListener("click", () => {
+        if (dragging) return;
+        if (key === sortKey) sortDir = -sortDir;
+        else {
+          sortKey = key;
+          sortDir = key === "symbol" ? 1 : -1;
+        }
+        renderHeader();
+        renderRows();
+      });
+
+      th.addEventListener("dragstart", (e) => {
+        dragging = true;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", key);
+        th.classList.add("dragging");
+      });
+      th.addEventListener("dragend", () => {
+        th.classList.remove("dragging");
+        theadEl.querySelectorAll(".drop-target").forEach((e) => e.classList.remove("drop-target"));
+        setTimeout(() => (dragging = false), 0);
+      });
+      th.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        th.classList.add("drop-target");
+      });
+      th.addEventListener("dragleave", () => th.classList.remove("drop-target"));
+      th.addEventListener("drop", (e) => {
+        e.preventDefault();
+        th.classList.remove("drop-target");
+        const from = e.dataTransfer.getData("text/plain");
+        if (!from || from === key) return;
+        const fi = order.indexOf(from);
+        order.splice(fi, 1);
+        order.splice(order.indexOf(key), 0, from);
+        saveOrder();
+        renderHeader();
+        renderRows();
+      });
+    });
+  }
+
+  // --- rows ---------------------------------------------------------
+  function renderRows() {
+    if (!latest) return;
+    const rows = latest.rows || [];
     const has = rows.length > 0;
     tableWrap.hidden = !has;
     emptyEl.hidden = has;
@@ -87,64 +167,94 @@
       return sortDir * (x - y);
     });
 
+    const cs = cols();
     rowsEl.innerHTML = rows
       .map(
-        (r) => `<tr>
-        <td class="col-sym" title="${r.symbol}">${disp(r.symbol)}</td>
-        <td class="num">${num(r.yclose)}</td>
-        <td class="num">${num(r.s_open)}</td>
-        <td class="num">${num(r.s_high)}</td>
-        <td class="num">${num(r.s_low)}</td>
-        <td class="num">${num(r.s_ltp)}</td>
-        <td class="num ${pctClass(r.s_pct)}">${pct(r.s_pct)}</td>
-        <td class="num live">${num(r.ltp)}</td>
-        <td class="num live ${pctClass(r.live_pct)}">${pct(r.live_pct)}</td>
-      </tr>`
+        (r) =>
+          "<tr>" +
+          cs
+            .map((c) => {
+              const v = r[c.k];
+              if (c.k === "symbol")
+                return `<td class="col-sym" title="${r.symbol}">${disp(r.symbol)}</td>`;
+              if (c.cls.includes("pct"))
+                return `<td class="${c.cls} ${pctClass(v)}">${pct(v)}</td>`;
+              return `<td class="${c.cls}">${num(v)}</td>`;
+            })
+            .join("") +
+          "</tr>"
       )
       .join("");
+  }
 
-    document.querySelectorAll(".scan-table thead th[data-k]").forEach((th) => {
-      th.classList.toggle("sorted", th.dataset.k === sortKey);
-      th.dataset.dir = th.dataset.k === sortKey ? (sortDir === 1 ? "asc" : "desc") : "";
-    });
+  // --- status strip ------------------------------------------------
+  const SOCK = {
+    connected: ["ok", "connected"],
+    connecting: ["warn", "connecting…"],
+    disconnected: ["bad", "disconnected"],
+    stale: ["warn", "feed stalled"],
+    error: ["bad", "error"],
+    "no-credentials": ["bad", "no broker session"],
+    idle: ["dim", "idle (market closed)"],
+  };
+
+  function renderStatus(s) {
+    if (s.day) $("daylabel").textContent = s.day;
+    if (s.freeze_time && s.freeze_time !== freezeLabel) {
+      freezeLabel = s.freeze_time;
+      if (!dragging) renderHeader();
+    }
+    $("freezetime") && ($("freezetime").textContent = s.freeze_time);
+
+    const fz = $("freeze");
+    if (s.frozen) {
+      const t = s.frozen_at ? new Date(s.frozen_at).toLocaleTimeString("en-GB") : "";
+      fz.textContent = "static: frozen " + t;
+      fz.className = "chip chip-ok";
+    } else {
+      fz.textContent = "static: forming until " + s.freeze_time;
+      fz.className = "chip chip-dim";
+    }
+
+    const sk = s.socket || {};
+    const [cls, label] = SOCK[sk.status] || ["dim", sk.status || "—"];
+    let txt = "socket: " + label;
+    if (sk.status === "connected" && sk.last_msg_seconds != null)
+      txt += " · tick " + ago(sk.last_msg_seconds);
+    else if (["disconnected", "stale", "error"].includes(sk.status))
+      txt += " · " + ago(sk.for_seconds);
+    const pill = $("sockpill");
+    pill.textContent = txt;
+    pill.className = "chip chip-" + cls;
   }
 
   function render() {
     if (!latest) return;
     renderStatus(latest);
-    renderRows(latest);
+    renderRows();
   }
 
-  // ---- clock (ticks locally between snapshots) ------------------------
+  // --- clock ------------------------------------------------------
   function tickClock() {
-    let d;
-    if (clockBase) {
-      d = new Date(clockBase.serverMs + (Date.now() - clockBase.localMs));
-    } else {
-      d = new Date();
-    }
+    const d = clockBase
+      ? new Date(clockBase.serverMs + (Date.now() - clockBase.localMs))
+      : new Date();
     $("clock").textContent = d.toLocaleTimeString("en-GB", { timeZone: "Asia/Kolkata" });
   }
   setInterval(tickClock, 1000);
   tickClock();
 
-  // ---- sorting -------------------------------------------------------
-  document.querySelectorAll(".scan-table thead th[data-k]").forEach((th) => {
-    th.addEventListener("click", () => {
-      const k = th.dataset.k;
-      if (k === sortKey) sortDir = -sortDir;
-      else {
-        sortKey = k;
-        sortDir = k === "symbol" ? 1 : -1;
-      }
-      render();
-    });
+  // --- reset layout --------------------------------------------------
+  $("resetcols").addEventListener("click", () => {
+    order = ALL_KEYS.slice();
+    saveOrder();
+    renderHeader();
+    renderRows();
   });
 
-  // ---- SSE ----------------------------------------------------------
-  let es;
+  // --- SSE ------------------------------------------------------------
   function connect() {
-    es = new EventSource("/api/scanner/stream");
+    const es = new EventSource("/api/scanner/stream");
     es.onmessage = (ev) => {
       try {
         latest = JSON.parse(ev.data);
@@ -155,15 +265,15 @@
       render();
     };
     es.onerror = () => {
-      // EventSource auto-reconnects; reflect the gap in the pill
       const pill = $("sockpill");
       pill.textContent = "stream: reconnecting…";
       pill.className = "chip chip-warn";
     };
   }
+
+  renderHeader();
   connect();
 
-  // initial one-shot so the page isn't blank for a second
   fetch("/api/scanner/state")
     .then((r) => r.json())
     .then((s) => {
