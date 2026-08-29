@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import time as dtime
 
-from .config import CONTROLS_FILE
+from .config import CONTROLS_FILE, FREEZE_TIME, MARKET_CLOSE, MARKET_OPEN
 from . import marketdata
 
 DEFAULTS: dict = {
     "universe": [],          # list of normalised Fyers symbols
     "universe_raw": "",      # what the user last typed (for the textarea)
+    "freeze_time": FREEZE_TIME.strftime("%H:%M"),  # IST HH:MM
 }
 
 
@@ -42,6 +44,22 @@ def normalize_symbol(raw: str) -> str | None:
     if s.endswith("-INDEX") or s.endswith("-EQ"):
         return f"NSE:{s}"
     return f"NSE:{s}-EQ"
+
+
+def parse_freeze_time(raw: str) -> str:
+    """Validate an IST HH:MM freeze time; return it normalised."""
+    m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", raw or "")
+    if not m:
+        raise ValueError("use HH:MM (24-hour)")
+    h, mi = int(m.group(1)), int(m.group(2))
+    if not (0 <= h < 24 and 0 <= mi < 60):
+        raise ValueError("not a valid time")
+    t = dtime(h, mi)
+    if t <= MARKET_OPEN or t >= MARKET_CLOSE:
+        raise ValueError(
+            f"must be between {MARKET_OPEN:%H:%M} and {MARKET_CLOSE:%H:%M} IST"
+        )
+    return f"{h:02d}:{mi:02d}"
 
 
 def parse_universe(text: str) -> list[str]:

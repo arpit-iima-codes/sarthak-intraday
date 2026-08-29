@@ -73,6 +73,22 @@
   {% endif %}
 </div>
 
+<div class="card">
+  <div class="card-head">
+    <span class="eyebrow">Scanner Controls</span>
+    <h1>Freeze time</h1>
+    <p class="sub">The static section is captured at this time (IST) and stops
+       updating; the live columns keep going. Must be between
+       {{ market_open }} and {{ market_close }}. Changing it re-captures the
+       snapshot for the new time (from 1-minute history).</p>
+  </div>
+  <form method="post" action="/controls/freeze-time" class="form-inline">
+    <input type="time" name="freeze_time" value="{{ freeze_time }}" required
+           min="{{ market_open }}" max="{{ market_close }}">
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+</div>
+
 <div class="card card-muted">
   <h2>More controls</h2>
   <p>Additional scanner settings will be added here.</p>

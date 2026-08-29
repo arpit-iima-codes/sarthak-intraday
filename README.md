@@ -55,8 +55,10 @@ One background service in the web process (hence a single uvicorn worker) owns
 one Fyers data websocket.
 
 - **Static columns** (Symbol, Y.Close, Open, High, Low, LTP, % ↑ close): frozen
-  at 10:00 IST, computed from Fyers 1-minute history so a mid-day restart still
-  reconstructs the snapshot. Before 10:00 they show the forming values.
+  at the configured **freeze time** (default 10:00 IST, set on `/controls`),
+  computed from Fyers 1-minute history so a mid-day restart still reconstructs
+  the snapshot. Before then they show the forming values. Changing the freeze
+  time re-captures the snapshot for the new time.
 - **Live columns** (LTP, % ↑ 10:00-high): updated from socket ticks.
 - In-memory only; resets each trading day. Nothing persisted.
 - Browser gets a Server-Sent-Events stream (`/api/scanner/stream`, ~1s);

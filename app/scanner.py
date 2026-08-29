@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from datetime import time as time_cls
 
 from fyers_apiv3.FyersWebsocket import data_ws
@@ -76,6 +76,7 @@ class ScannerService:
 
         self.rows: dict[str, Row] = {}
         self.universe: list[str] = []
+        self.freeze_time: time_cls = FREEZE_TIME
         self.day: date | None = None
         self.frozen_at: datetime | None = None
         self._last_seed = 0.0
@@ -92,7 +93,7 @@ class ScannerService:
     # ------------------------------------------------------------------ #
     def start(self) -> None:
         self._stop.clear()
-        self.reload_universe()
+        self.reload_controls()
         for target in (self._scheduler_loop, self._socket_loop):
             t = threading.Thread(target=target, name=target.__name__, daemon=True)
             t.start()
@@ -103,16 +104,32 @@ class ScannerService:
         self._stop.set()
         self._teardown_socket("idle")
 
-    def reload_universe(self) -> None:
+    def _load_freeze_time(self) -> time_cls:
+        raw = controls.load().get("freeze_time") or FREEZE_TIME.strftime("%H:%M")
+        try:
+            h, m = (int(x) for x in raw.split(":"))
+            return time_cls(h, m)
+        except (ValueError, TypeError):
+            return FREEZE_TIME
+
+    def reload_controls(self) -> None:
         self.universe = list(controls.load().get("universe", []))
+        new_freeze = self._load_freeze_time()
         with self._lock:
             for sym in self.universe:
                 self.rows.setdefault(sym, Row(sym))
             for sym in list(self.rows):
                 if sym not in self.universe:
                     self.rows.pop(sym, None)
+            if new_freeze != self.freeze_time:
+                self.freeze_time = new_freeze
+                self.frozen_at = None      # re-capture at / for the new time
+                log.info("freeze time set to %s", new_freeze.strftime("%H:%M"))
         self._sync_subscription()
-        log.info("universe reloaded: %d symbols", len(self.universe))
+        log.info("controls reloaded: %d symbols", len(self.universe))
+
+    # kept for older callers
+    reload_universe = reload_controls
 
     def _auth(self) -> str | None:
         data = broker_session.load()
@@ -186,9 +203,10 @@ class ScannerService:
 
     def _maybe_freeze(self) -> None:
         now = datetime.now(IST)
+        freeze_time = self.freeze_time
         if self.frozen_at is not None:
             return
-        if now.weekday() >= 5 or now.time() < FREEZE_TIME:
+        if now.weekday() >= 5 or now.time() < freeze_time:
             return
         auth = self._auth()
         if not auth:
@@ -198,8 +216,11 @@ class ScannerService:
         if not symbols:
             return
         cutoff = int(
-            datetime.combine(self.day, FREEZE_TIME, tzinfo=IST).timestamp()
+            datetime.combine(self.day, freeze_time, tzinfo=IST).timestamp()
         )
+        grace_end = (
+            datetime.combine(self.day, freeze_time) + timedelta(minutes=15)
+        ).time()
 
         computed: dict[str, tuple] = {}
         for sym in symbols:
@@ -221,7 +242,7 @@ class ScannerService:
 
         # give the history feed a few minutes of grace before locking in a
         # blank snapshot (covers a slow feed / market holiday ambiguity)
-        if not computed and now.time() < time_cls(10, 15):
+        if not computed and now.time() < grace_end:
             return
 
         with self._lock:
@@ -391,7 +412,7 @@ class ScannerService:
         return {
             "server_time": now.isoformat(),
             "day": self.day.isoformat() if self.day else None,
-            "freeze_time": FREEZE_TIME.strftime("%H:%M"),
+            "freeze_time": self.freeze_time.strftime("%H:%M"),
             "frozen": self.frozen_at is not None,
             "frozen_at": self.frozen_at.isoformat() if self.frozen_at else None,
             "market_open": MARKET_OPEN <= now.time() <= MARKET_CLOSE

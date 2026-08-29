@@ -7,6 +7,7 @@
   GET  /scanner             daily live scanner
   GET  /controls            broker details + scanner controls (landing page)
   POST /controls/universe   validate + save the universe
+  POST /controls/freeze-time  set the static-section freeze time (IST)
   GET  /api/scanner/state   one-shot scanner snapshot (JSON)
   GET  /api/scanner/stream  scanner snapshot stream (SSE, ~1s)
   GET  /health              json status
@@ -35,7 +36,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import controls
 from . import session as broker_session
-from .config import IST, SESSION_SECRET, get_settings
+from .config import IST, MARKET_CLOSE, MARKET_OPEN, SESSION_SECRET, get_settings
 from .fyers import (
     AppConfig,
     FyersAuthError,
@@ -160,7 +161,7 @@ async def fyers_callback(request: Request):
 
     record = broker_session.save(result)
     request.session["authed"] = True
-    scanner.reload_universe()
+    scanner.reload_controls()
     name = (record.get("profile") or {}).get("name") or record.get("fy_id") or "your account"
     _flash(request, f"Connected to Fyers as {name}.", "success")
     return RedirectResponse("/controls", status_code=303)
@@ -256,6 +257,9 @@ async def controls_page(request: Request):
         _ctx(request, data=data, profile=profile, funds=funds,
              connected_ist=connected_ist,
              universe_raw=raw, universe=cfg.get("universe", []),
+             freeze_time=cfg.get("freeze_time"),
+             market_open=MARKET_OPEN.strftime("%H:%M"),
+             market_close=MARKET_CLOSE.strftime("%H:%M"),
              results=request.session.pop("_validation", None)),
     )
 
@@ -270,7 +274,7 @@ async def save_universe(request: Request, universe: str = Form("")):
     symbols = controls.parse_universe(universe)
     if not symbols:
         controls.save({"universe": [], "universe_raw": universe})
-        scanner.reload_universe()
+        scanner.reload_controls()
         _flash(request, "Universe cleared.", "success")
         return RedirectResponse("/controls", status_code=303)
 
@@ -282,7 +286,7 @@ async def save_universe(request: Request, universe: str = Form("")):
 
     valid = [r["symbol"] for r in results if r["ok"]]
     controls.save({"universe": valid, "universe_raw": universe})
-    scanner.reload_universe()
+    scanner.reload_controls()
 
     request.session["_validation"] = results
     bad = len(results) - len(valid)
@@ -291,6 +295,23 @@ async def save_universe(request: Request, universe: str = Form("")):
                "error" if not valid else "success")
     else:
         _flash(request, f"All {len(valid)} symbol(s) valid and saved.", "success")
+    return RedirectResponse("/controls", status_code=303)
+
+
+@app.post("/controls/freeze-time")
+async def save_freeze_time(request: Request, freeze_time: str = Form("")):
+    if not await active_session():
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+    try:
+        value = controls.parse_freeze_time(freeze_time)
+    except ValueError as exc:
+        _flash(request, f"Freeze time — {exc}.")
+        return RedirectResponse("/controls", status_code=303)
+
+    controls.save({"freeze_time": value})
+    scanner.reload_controls()
+    _flash(request, f"Freeze time set to {value} IST.", "success")
     return RedirectResponse("/controls", status_code=303)
 
 

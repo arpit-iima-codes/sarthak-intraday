@@ -163,6 +163,14 @@ h2 {
 
 /* ---------- form ---------- */
 .form { display: flex; flex-direction: column; gap: 18px; }
+.form-inline { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.form-inline input { width: auto; }
+.form-inline input[type="time"] {
+  font-family: var(--mono);
+  font-size: 15px;
+  color-scheme: dark;
+}
+.form-inline .btn-primary { width: auto; margin-top: 0; }
 .field { display: flex; flex-direction: column; gap: 8px; flex: 1; }
 .field-row { display: flex; gap: 16px; }
 
