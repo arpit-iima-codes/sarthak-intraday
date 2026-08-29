@@ -40,6 +40,11 @@
           <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
         </form>
         {% endif %}
+        {% if nav %}
+        <form method="post" action="/gate/logout" class="topbar-form">
+          <button type="submit" class="btn btn-ghost btn-sm" title="Lock the terminal">Lock</button>
+        </form>
+        {% endif %}
         <button type="button" class="theme-toggle" id="themebtn"
                 aria-label="Toggle light and dark theme" title="Toggle theme"></button>
       </div>

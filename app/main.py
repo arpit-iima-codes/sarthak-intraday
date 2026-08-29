@@ -1,5 +1,8 @@
 """sarthak-intraday — Fyers connection, live scanner, controls.
 
+  GET  /gate                front-door login screen (username + password)
+  POST /gate                check credentials, set the gate cookie
+  POST /gate/logout         drop the gate cookie (lock the terminal)
   GET  /                    login page (redirects to /controls when connected)
   GET  /login               start the Fyers OAuth flow
   GET  /fyers/callback      OAuth redirect target
@@ -24,6 +27,7 @@ import secrets
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import (
@@ -65,6 +69,40 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="sarthak-intraday", docs_url=None, redoc_url=None, lifespan=lifespan)
+
+# Paths reachable without unlocking the front-door gate.
+_GATE_OPEN_PATHS = {"/gate", "/gate/logout", "/health"}
+
+
+@app.middleware("http")
+async def front_gate(request: Request, call_next):
+    """Hold every page behind the styled /gate screen until it's unlocked.
+
+    Registered before SessionMiddleware below so that middleware sits *outside*
+    this one — request.session is already populated by the time we run.
+    Disabled entirely when no gate password is configured.
+    """
+    path = request.url.path
+    if (
+        path in _GATE_OPEN_PATHS
+        or path.startswith("/static/")
+        or not get_settings().gate_ready
+    ):
+        return await call_next(request)
+
+    try:
+        unlocked = bool(request.session.get("gate_ok"))
+    except (AssertionError, KeyError):
+        unlocked = False
+    if unlocked:
+        return await call_next(request)
+
+    nxt = path + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(f"/gate?next={quote(nxt, safe='')}", status_code=303)
+
+
+# SessionMiddleware is added *after* front_gate so it wraps it: the gate check
+# above needs request.session ready.
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
@@ -127,6 +165,51 @@ def _take_flashes(request: Request) -> list[dict]:
 
 def _ctx(request: Request, **extra) -> dict:
     return {"flashes": _take_flashes(request), "nav": request.url.path, **extra}
+
+
+# --------------------------------------------------------------------------- #
+# front-door gate
+# --------------------------------------------------------------------------- #
+def _safe_next(value: str) -> str:
+    """Only allow same-site relative redirects."""
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    return "/"
+
+
+@app.get("/gate", response_class=HTMLResponse)
+async def gate_form(request: Request, next: str = "/"):
+    if request.session.get("gate_ok") or not get_settings().gate_ready:
+        return RedirectResponse(_safe_next(next), status_code=303)
+    return templates.TemplateResponse(
+        request, "gate.html",
+        {"flashes": _take_flashes(request), "next": next},
+    )
+
+
+@app.post("/gate")
+async def gate_submit(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+    next: str = Form("/"),
+):
+    s = get_settings()
+    ok = secrets.compare_digest(username.strip(), s.gate_user) and secrets.compare_digest(
+        password, s.gate_password
+    )
+    if not ok:
+        _flash(request, "Incorrect username or password.")
+        return RedirectResponse(f"/gate?next={quote(next, safe='')}", status_code=303)
+    request.session["gate_ok"] = True
+    return RedirectResponse(_safe_next(next), status_code=303)
+
+
+@app.post("/gate/logout")
+async def gate_logout(request: Request):
+    request.session.pop("gate_ok", None)
+    _flash(request, "Terminal locked.", "success")
+    return RedirectResponse("/gate", status_code=303)
 
 
 # --------------------------------------------------------------------------- #

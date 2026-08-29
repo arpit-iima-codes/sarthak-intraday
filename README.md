@@ -78,8 +78,15 @@ one Fyers data websocket.
    FYERS_SECRET_KEY=...
    FYERS_REDIRECT_URI=https://80.225.196.44.nip.io/fyers/callback
    FYERS_FY_ID=XS89030
+   GATE_USER=sarthak          # front-door login screen
+   GATE_PASSWORD=...          # empty = gate disabled
    ```
 3. `sudo systemctl restart sarthak-intraday`
+
+The **front-door gate** (`GATE_USER` / `GATE_PASSWORD`) is a styled
+username/password screen at `/gate` shown before anything else — the app
+itself has no per-user auth, every page otherwise gates only on the shared
+server-side Fyers token. `/health` stays open. "Lock" in the top bar clears it.
 
 ## Run locally
 

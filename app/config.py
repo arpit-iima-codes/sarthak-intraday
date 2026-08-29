@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     # asks for PIN + TOTP/OTP.
     fyers_fy_id: str = ""
 
+    # Front-door gate: a styled username/password screen shown before the
+    # Fyers connection page. Leave gate_password empty to disable the gate.
+    gate_user: str = "sarthak"
+    gate_password: str = ""
+
+    @property
+    def gate_ready(self) -> bool:
+        return bool(self.gate_user and self.gate_password)
+
     @property
     def redirect_uri(self) -> str:
         return self.fyers_redirect_uri or f"{self.public_url}/fyers/callback"

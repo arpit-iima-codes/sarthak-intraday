@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Unlock · Sarthak Intraday{% endblock %}
+{% block wrap_class %}wrap-narrow{% endblock %}
+
+{% block content %}
+<div class="card login-card">
+  <div class="card-head">
+    <span class="eyebrow">Restricted Access</span>
+    <h1>Unlock the terminal</h1>
+    <p class="sub">
+      Enter the access credentials to continue to the Fyers connection.
+    </p>
+  </div>
+
+  <form class="form" method="post" action="/gate">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <div class="field">
+      <label for="g-user">Username</label>
+      <input id="g-user" name="username" autocomplete="username"
+             autocapitalize="off" autocorrect="off" spellcheck="false"
+             required autofocus>
+    </div>
+
+    <div class="field">
+      <label for="g-pass">Password</label>
+      <input id="g-pass" name="password" type="password"
+             autocomplete="current-password" required>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-block">Unlock</button>
+  </form>
+</div>
+{% endblock %}
