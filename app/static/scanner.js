@@ -14,7 +14,6 @@
     { k: "s_open",   label: "Open",           grp: "static", cls: "num" },
     { k: "s_high",   label: "High",           grp: "static", cls: "num" },
     { k: "s_low",    label: "Low",            grp: "static", cls: "num" },
-    { k: "s_ltp",    label: "LTP",            grp: "static", cls: "num" },
     { k: "s_pct",    label: "% ↑ close", grp: "static", cls: "num pct" },
     { k: "ltp",      label: "LTP",            grp: "live",   cls: "num live" },
     { k: "live_pct", label: "% ↑ 10:00 high", grp: "live", cls: "num live pct" },

@@ -63,8 +63,7 @@ class Row:
             "s_open": self.s_open,
             "s_high": self.s_high,
             "s_low": self.s_low,
-            "s_ltp": self.s_ltp,
-            "s_pct": self.s_pct,
+            "s_pct": self.s_pct,   # s_ltp is kept internally (feeds s_pct) but not sent
             "ltp": self.ltp,
             "live_pct": self.live_pct,
         }
