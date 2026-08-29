@@ -32,6 +32,8 @@ log = logging.getLogger("scanner")
 STALE_FEED_SECONDS = 90        # no ticks this long while connected -> rebuild
 SEED_INTERVAL = 5             # seconds between pre-freeze quote refreshes
 HISTORY_THROTTLE = 0.15       # seconds between history calls during freeze
+SUBSCRIBE_BATCH = 500        # symbols per subscribe/unsubscribe call
+SUBSCRIBE_PAUSE = 0.3        # seconds between subscribe batches (server breathing room)
 
 
 def _pct(value: float | None, base: float | None) -> float | None:
@@ -87,6 +89,7 @@ class ScannerService:
 
         self._sock: data_ws.FyersDataSocket | None = None
         self._subscribed: set[str] = set()
+        self._resub_pending = threading.Event()   # universe/connection changed
         self.sock_status = "idle"      # idle|no-credentials|connecting|connected|disconnected|stale|error
         self.sock_since = time.time()
         self.sock_last_msg = 0.0
@@ -134,7 +137,7 @@ class ScannerService:
                     self._need_refreeze = True   # re-capture from history, keep
                     #                              the current snapshot until then
                 log.info("freeze time set to %s", new_freeze.strftime("%H:%M"))
-        self._sync_subscription()
+        self._resub_pending.set()   # picked up by _socket_loop
         log.info("controls reloaded: %d symbols", len(self.universe))
 
     # kept for older callers
@@ -336,6 +339,10 @@ class ScannerService:
                 self._teardown_socket(self.sock_status)
                 self._open_socket(auth)
 
+            if self.sock_status == "connected" and self._resub_pending.is_set():
+                self._resub_pending.clear()
+                self._sync_subscription()
+
             self._stop.wait(3)
 
     def _open_socket(self, auth: str) -> None:
@@ -363,6 +370,7 @@ class ScannerService:
     def _teardown_socket(self, status: str) -> None:
         sock, self._sock = self._sock, None
         self._subscribed.clear()
+        self._resub_pending.clear()
         if sock is not None:
             try:
                 sock.close_connection()
@@ -371,10 +379,15 @@ class ScannerService:
         self._set_status(status)
 
     def _on_open(self) -> None:
+        # Runs synchronously from sock.connect() — on our _socket_loop thread
+        # for a fresh connect, on the SDK's ws thread for an auto-reconnect.
+        # Keep it cheap: the SDK has just wiped its subscription tables, so
+        # flag a full resubscribe and let _socket_loop do the chunked work.
         self.sock_attempts = 0
         self.sock_last_msg = time.time()
+        self._subscribed.clear()
+        self._resub_pending.set()
         self._set_status("connected")
-        self._sync_subscription(force=True)
         log.info("socket connected")
 
     def _on_message(self, msg: dict) -> None:
@@ -416,7 +429,15 @@ class ScannerService:
             self.sock_status = status
             self.sock_since = time.time()
 
-    def _sync_subscription(self, force: bool = False) -> None:
+    def _sync_subscription(self) -> None:
+        """Bring the socket's subscriptions in line with the universe.
+
+        Diff-based: after a (re)connect _subscribed is empty, so this
+        resubscribes the whole universe; on a universe edit it only moves the
+        delta. Sent in batches with a pause between them — the SDK blocks the
+        caller ~0.5s per internal frame and the server dislikes one huge burst,
+        so at 2000 symbols this takes a few seconds. Runs on _socket_loop only.
+        """
         sock = self._sock
         if sock is None or self.sock_status != "connected":
             return
@@ -424,17 +445,29 @@ class ScannerService:
             wanted = set(self.rows)
         add = sorted(wanted - self._subscribed)
         remove = sorted(self._subscribed - wanted)
-        if force:
-            add = sorted(wanted)
-        try:
-            if add:
-                sock.subscribe(symbols=add, data_type="SymbolUpdate")
-                self._subscribed |= set(add)
-            if remove:
-                sock.unsubscribe(symbols=remove, data_type="SymbolUpdate")
-                self._subscribed -= set(remove)
-        except Exception:  # noqa: BLE001
-            log.exception("subscription sync failed")
+
+        for action, symbols in (("unsubscribe", remove), ("subscribe", add)):
+            for i in range(0, len(symbols), SUBSCRIBE_BATCH):
+                if self._stop.is_set() or self._sock is not sock:
+                    return
+                batch = symbols[i : i + SUBSCRIBE_BATCH]
+                try:
+                    if action == "subscribe":
+                        sock.subscribe(symbols=batch, data_type="SymbolUpdate")
+                        self._subscribed |= set(batch)
+                    else:
+                        sock.unsubscribe(symbols=batch, data_type="SymbolUpdate")
+                        self._subscribed -= set(batch)
+                except Exception:  # noqa: BLE001
+                    log.exception("%s batch failed (%d symbols)", action, len(batch))
+                    return
+                if i + SUBSCRIBE_BATCH < len(symbols):
+                    self._stop.wait(SUBSCRIBE_PAUSE)
+        if add or remove:
+            log.info(
+                "subscription synced: +%d -%d (%d live)",
+                len(add), len(remove), len(self._subscribed),
+            )
 
     # ------------------------------------------------------------------ #
     # snapshot for the API

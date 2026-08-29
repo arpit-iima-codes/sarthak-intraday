@@ -10,9 +10,12 @@ WorkingDirectory=/home/ubuntu/sarthak-intraday
 Environment=HOST=127.0.0.1
 Environment=PORT=8092
 # One worker only: the scanner runs a background websocket + threads in-process.
+# uvloop/httptools (from uvicorn[standard]) — the box is single-core and the
+# tick-decode thread contends with the event loop for it.
 ExecStart=/home/ubuntu/sarthak-intraday/.venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 --port 8092 --workers 1 --proxy-headers \
-    --forwarded-allow-ips 127.0.0.1 --timeout-graceful-shutdown 5
+    --forwarded-allow-ips 127.0.0.1 --timeout-graceful-shutdown 5 \
+    --loop uvloop --http httptools
 Restart=on-failure
 RestartSec=3
 
