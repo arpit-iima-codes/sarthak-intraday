@@ -1,0 +1,19 @@
+[Unit]
+Description=sarthak-intraday — screener & trading terminal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/sarthak-intraday
+Environment=HOST=127.0.0.1
+Environment=PORT=8092
+ExecStart=/home/ubuntu/sarthak-intraday/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8092 --workers 2 --proxy-headers \
+    --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

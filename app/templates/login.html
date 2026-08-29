@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Sign In · Sarthak Intraday{% endblock %}
+{% block wrap_class %}wrap-narrow{% endblock %}
+
+{% block content %}
+<div class="card login-card">
+  <div class="card-head">
+    <span class="eyebrow">Broker Connection</span>
+    <h1>Sign in to Fyers</h1>
+    <p class="sub">
+      You'll be taken to the Fyers login page to authenticate with your
+      Client ID, PIN and TOTP / OTP. Fyers then brings you back here, connected.
+    </p>
+  </div>
+
+  {% if not creds_ready %}
+    <div class="flash flash-error">
+      Fyers app credentials are not configured. Set <code>FYERS_CLIENT_ID</code>
+      and <code>FYERS_SECRET_KEY</code> in <code>.env</code>, then restart.
+    </div>
+  {% endif %}
+
+  {% if fy_id %}
+    <div class="account-chip">
+      <span class="dot"></span>
+      <span>Account <strong class="mono">{{ fy_id }}</strong></span>
+    </div>
+  {% endif %}
+
+  <a href="/login" class="btn btn-primary btn-block {% if not creds_ready %}is-disabled{% endif %}">
+    Sign In with Fyers
+  </a>
+
+  <p class="hint">
+    Redirect URI &nbsp;·&nbsp; <code>{{ redirect_uri }}</code>
+  </p>
+</div>
+{% endblock %}

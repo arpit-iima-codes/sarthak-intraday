@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Sarthak Intraday{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="royal-bg" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="/" class="brand">
+        <span class="crest">✦</span>
+        <span class="brand-text">Sarthak <span class="brand-sub">Intraday</span></span>
+      </a>
+      <span class="tag">Screener &amp; Trading Terminal</span>
+      {% block topbar_right %}{% endblock %}
+    </div>
+  </header>
+
+  <main class="wrap {% block wrap_class %}{% endblock %}">
+    {% if flashes %}
+      <div class="flashes">
+        {% for f in flashes %}
+          <div class="flash flash-{{ f.level }}">{{ f.msg }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span class="rule"></span>
+    <span>Sarthak Intraday</span>
+    <span class="rule"></span>
+  </footer>
+</body>
+</html>
