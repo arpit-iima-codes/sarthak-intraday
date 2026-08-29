@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Sarthak Intraday{% endblock %}</title>
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try {
+      var _t = localStorage.getItem('theme');
+      if (_t === 'light' || _t === 'dark') document.documentElement.setAttribute('data-theme', _t);
+    } catch (e) {}
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap" rel="stylesheet">
@@ -23,13 +30,19 @@
         <a href="/scanner" class="{{ 'active' if nav == '/scanner' }}">Scanner</a>
         <a href="/controls" class="{{ 'active' if nav == '/controls' }}">Controls</a>
       </nav>
-      <form method="post" action="/logout" class="topbar-form">
-        <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
-      </form>
       {% else %}
       <span class="tag">Screener &amp; Trading Terminal</span>
       {% endif %}
-      {% block topbar_right %}{% endblock %}
+      <div class="topbar-right">
+        {% block topbar_right %}{% endblock %}
+        {% if nav and nav != "/" %}
+        <form method="post" action="/logout" class="topbar-form">
+          <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
+        </form>
+        {% endif %}
+        <button type="button" class="theme-toggle" id="themebtn"
+                aria-label="Toggle light and dark theme" title="Toggle theme"></button>
+      </div>
     </div>
   </header>
 
@@ -49,6 +62,7 @@
     <span>Sarthak Intraday</span>
     <span class="rule"></span>
   </footer>
+  <script src="/static/theme.js"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
