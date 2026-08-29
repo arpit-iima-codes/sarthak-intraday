@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import json
 import secrets
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -45,7 +46,7 @@ from .fyers import (
     exchange_code,
     fetch_funds,
     fetch_profile,
-    token_is_valid,
+    token_status,
 )
 from .marketdata import MarketDataError
 from .scanner import scanner
@@ -86,13 +87,33 @@ def broker_auth() -> str | None:
     return f"{data['client_id']}:{data['access_token']}"
 
 
+# A positive /profile check is trusted for this long, so ordinary navigation
+# isn't one round-trip per page. Only a *definitive* rejection logs you out;
+# a network blip / rate-limit / 5xx keeps the session (downstream API calls
+# surface any real problem).
+_SESSION_OK_TTL = 90.0
+_session_check: dict = {"token": None, "ok_at": 0.0}
+
+
 async def active_session() -> dict | None:
-    """Stored session, but only if its token still authenticates."""
+    """Stored session, unless Fyers positively rejects its token."""
     data = broker_session.load()
-    if not data:
+    if not data or not data.get("access_token"):
         return None
-    if not await token_is_valid(data["client_id"], data["access_token"]):
+
+    token = data["access_token"]
+    now = time.time()
+    if _session_check["token"] == token and now - _session_check["ok_at"] < _SESSION_OK_TTL:
+        return data
+
+    status = await token_status(data["client_id"], token)
+    if status == "valid":
+        _session_check.update(token=token, ok_at=now)
+        return data
+    if status == "invalid":
+        _session_check.update(token=None, ok_at=0.0)
         return None
+    # "unknown" — couldn't reach Fyers. Don't sign the user out over a blip.
     return data
 
 

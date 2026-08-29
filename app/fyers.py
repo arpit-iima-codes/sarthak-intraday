@@ -27,6 +27,13 @@ class FyersAuthError(Exception):
     """Any failure in the Fyers login flow."""
 
 
+class FyersUnavailable(FyersAuthError):
+    """Transient failure reaching Fyers (network, timeout, 5xx, rate-limit,
+    non-JSON). NOT an auth rejection — the token may well still be valid.
+    A subclass of FyersAuthError so existing `except FyersAuthError` blocks
+    keep working; callers that care check for this first."""
+
+
 @dataclass(frozen=True)
 class AppConfig:
     client_id: str        # "6349V3VIP6-200"
@@ -106,16 +113,31 @@ async def _authed_get(path: str, client_id: str, access_token: str) -> dict:
                 f"{API}{path}",
                 headers={"Authorization": f"{client_id}:{access_token}"},
             )
+        except httpx.HTTPError as exc:
+            raise FyersUnavailable(f"{path} request failed: {exc}") from exc
+        if resp.status_code >= 500:
+            raise FyersUnavailable(f"{path}: HTTP {resp.status_code}")
+        try:
             return resp.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise FyersAuthError(f"{path} request failed: {exc}") from exc
+        except ValueError as exc:
+            raise FyersUnavailable(f"{path}: non-JSON response") from exc
+
+
+# Fyers error codes / phrases that mean "try again later", not "bad token".
+_TRANSIENT_CODES = {-99, -209, -300, -429}
+_TRANSIENT_HINTS = ("rate limit", "too many request", "try again", "timeout",
+                    "temporarily", "service unavailable")
 
 
 async def fetch_profile(client_id: str, access_token: str) -> dict:
     """Hit /profile to confirm the token authenticates."""
     data = await _authed_get("/profile", client_id, access_token)
     if data.get("s") != "ok":
-        raise FyersAuthError(data.get("message") or "token rejected by /profile")
+        msg = data.get("message") or "token rejected by /profile"
+        code = data.get("code")
+        if code in _TRANSIENT_CODES or any(h in msg.lower() for h in _TRANSIENT_HINTS):
+            raise FyersUnavailable(msg)
+        raise FyersAuthError(msg)
     return data.get("data") or {}
 
 
@@ -142,9 +164,20 @@ async def fetch_funds(client_id: str, access_token: str) -> dict:
     }
 
 
-async def token_is_valid(client_id: str, access_token: str) -> bool:
+async def token_status(client_id: str, access_token: str) -> str:
+    """'valid'   — /profile authenticated the token
+       'invalid' — Fyers positively rejected it (expired / revoked)
+       'unknown' — couldn't reach Fyers, or a transient error; token may still be fine
+    """
     try:
         await fetch_profile(client_id, access_token)
-        return True
+        return "valid"
+    except FyersUnavailable:
+        return "unknown"
     except FyersAuthError:
-        return False
+        return "invalid"
+
+
+async def token_is_valid(client_id: str, access_token: str) -> bool:
+    """Back-compat: True only on a positive check (transient failure -> False)."""
+    return await token_status(client_id, access_token) == "valid"
