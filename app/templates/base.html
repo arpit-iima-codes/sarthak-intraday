@@ -20,10 +20,12 @@
       </a>
       {% if nav and nav != "/" %}
       <nav class="mainnav">
-        <a href="/dashboard" class="{{ 'active' if nav == '/dashboard' }}">Dashboard</a>
         <a href="/scanner" class="{{ 'active' if nav == '/scanner' }}">Scanner</a>
         <a href="/controls" class="{{ 'active' if nav == '/controls' }}">Controls</a>
       </nav>
+      <form method="post" action="/logout" class="topbar-form">
+        <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
+      </form>
       {% else %}
       <span class="tag">Screener &amp; Trading Terminal</span>
       {% endif %}

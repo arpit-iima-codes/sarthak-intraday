@@ -1,12 +1,11 @@
 """sarthak-intraday — Fyers connection, live scanner, controls.
 
-  GET  /                    login page (redirects to /dashboard when connected)
+  GET  /                    login page (redirects to /controls when connected)
   GET  /login               start the Fyers OAuth flow
   GET  /fyers/callback      OAuth redirect target
   POST /logout              drop the stored session
-  GET  /dashboard           connected landing page
   GET  /scanner             daily live scanner
-  GET  /controls            scanner controls (symbol universe, ...)
+  GET  /controls            broker details + scanner controls (landing page)
   POST /controls/universe   validate + save the universe
   GET  /api/scanner/state   one-shot scanner snapshot (JSON)
   GET  /api/scanner/stream  scanner snapshot stream (SSE, ~1s)
@@ -20,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import secrets
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -35,7 +35,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import controls
 from . import session as broker_session
-from .config import SESSION_SECRET, get_settings
+from .config import IST, SESSION_SECRET, get_settings
 from .fyers import (
     AppConfig,
     FyersAuthError,
@@ -111,7 +111,7 @@ def _ctx(request: Request, **extra) -> dict:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     if request.session.get("authed") and await active_session():
-        return RedirectResponse("/dashboard", status_code=303)
+        return RedirectResponse("/controls", status_code=303)
 
     s = get_settings()
     return templates.TemplateResponse(
@@ -163,7 +163,7 @@ async def fyers_callback(request: Request):
     scanner.reload_universe()
     name = (record.get("profile") or {}).get("name") or record.get("fy_id") or "your account"
     _flash(request, f"Connected to Fyers as {name}.", "success")
-    return RedirectResponse("/dashboard", status_code=303)
+    return RedirectResponse("/controls", status_code=303)
 
 
 @app.post("/logout")
@@ -174,25 +174,9 @@ async def do_logout(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    data = await active_session()
-    if not data:
-        request.session.clear()
-        _flash(request, "Not connected. Please sign in.")
-        return RedirectResponse("/", status_code=303)
-
-    try:
-        funds = await fetch_funds(data["client_id"], data["access_token"])
-        profile = await fetch_profile(data["client_id"], data["access_token"])
-    except FyersAuthError:
-        funds = data.get("funds") or {}
-        profile = data.get("profile") or {}
-
-    return templates.TemplateResponse(
-        request, "dashboard.html",
-        _ctx(request, data=data, profile=profile, funds=funds),
-    )
+@app.get("/dashboard")
+async def dashboard_moved():
+    return RedirectResponse("/controls", status_code=301)
 
 
 # --------------------------------------------------------------------------- #
@@ -247,11 +231,31 @@ async def controls_page(request: Request):
         _flash(request, "Not connected. Please sign in.")
         return RedirectResponse("/", status_code=303)
 
+    try:
+        funds = await fetch_funds(data["client_id"], data["access_token"])
+        profile = await fetch_profile(data["client_id"], data["access_token"])
+    except FyersAuthError:
+        funds = data.get("funds") or {}
+        profile = data.get("profile") or {}
+
+    connected_ist = None
+    if data.get("connected_at"):
+        try:
+            connected_ist = (
+                datetime.fromisoformat(data["connected_at"])
+                .astimezone(IST)
+                .strftime("%d %b %Y, %I:%M %p IST")
+            )
+        except ValueError:
+            connected_ist = data["connected_at"]
+
     cfg = controls.load()
     raw = cfg.get("universe_raw") or ", ".join(cfg.get("universe", []))
     return templates.TemplateResponse(
         request, "controls.html",
-        _ctx(request, universe_raw=raw, universe=cfg.get("universe", []),
+        _ctx(request, data=data, profile=profile, funds=funds,
+             connected_ist=connected_ist,
+             universe_raw=raw, universe=cfg.get("universe", []),
              results=request.session.pop("_validation", None)),
     )
 
