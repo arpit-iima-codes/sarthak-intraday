@@ -151,6 +151,16 @@ class ScannerService:
                 log.exception("scheduler tick failed")
             self._stop.wait(3)
 
+    def _forming(self) -> bool:
+        """True only while the static section is legitimately still accumulating
+        (not frozen, and the clock has not yet reached the freeze time). Once
+        the freeze time has passed the static columns wait for the history
+        snapshot in _maybe_freeze — they never take live ticks."""
+        return (
+            self.frozen_at is None
+            and datetime.now(IST).time() < self.freeze_time
+        )
+
     def _ensure_day(self) -> None:
         today = datetime.now(IST).date()
         with self._lock:
@@ -167,12 +177,12 @@ class ScannerService:
         now = time.time()
         if now - self._last_seed < SEED_INTERVAL:
             return
-        frozen = self.frozen_at is not None
+        forming = self._forming()
         with self._lock:
-            if frozen:
-                need = [s for s, r in self.rows.items() if r.yclose is None]
-            else:
+            if forming:
                 need = list(self.rows)
+            else:
+                need = [s for s, r in self.rows.items() if r.yclose is None]
         if not need:
             self._last_seed = now
             return
@@ -193,7 +203,7 @@ class ScannerService:
                 row.yclose = v.get("prev_close_price") or row.yclose
                 if row.ltp is None:
                     row.ltp = v.get("lp")
-                if not self.frozen_at:
+                if forming:
                     row.s_open = v.get("open_price") or row.s_open
                     row.s_high = v.get("high_price") or row.s_high
                     row.s_low = v.get("low_price") or row.s_low
@@ -357,7 +367,7 @@ class ScannerService:
                 row.last_tick = time.time()
             if row.yclose is None and msg.get("prev_close_price"):
                 row.yclose = msg["prev_close_price"]
-            if self.frozen_at is None:
+            if self._forming():
                 row.s_open = msg.get("open_price") or row.s_open
                 row.s_high = msg.get("high_price") or row.s_high
                 row.s_low = msg.get("low_price") or row.s_low
