@@ -120,8 +120,7 @@ async def index(request: Request):
     return templates.TemplateResponse(
         request,
         "login.html",
-        _ctx(request, creds_ready=s.creds_ready, fy_id=s.fyers_fy_id,
-             redirect_uri=s.redirect_uri),
+        _ctx(request, creds_ready=s.creds_ready, fy_id=s.fyers_fy_id),
     )
 
 
