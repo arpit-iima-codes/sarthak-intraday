@@ -393,25 +393,6 @@ code {
 }
 .kv dd { margin: 0; word-break: break-all; font-size: 14px; }
 
-/* ---------- footer ---------- */
-.footer {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 26px;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--ink-faint);
-}
-.footer .rule {
-  width: 60px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--line), transparent);
-}
-
 @media (max-width: 480px) {
   .field-row { flex-direction: column; }
   .wrap { padding: 36px 20px; }
@@ -589,7 +570,7 @@ code {
   display: flex;
   gap: 16px;
   align-items: stretch;
-  height: calc(100vh - 190px);
+  height: calc(100vh - 116px);
   min-height: 460px;
 }
 
