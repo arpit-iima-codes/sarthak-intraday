@@ -15,7 +15,9 @@ State is in memory and resets every trading day. Nothing is persisted.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,7 +28,9 @@ from fyers_apiv3.FyersWebsocket import data_ws
 
 from . import controls, marketdata
 from . import session as broker_session
-from .config import FREEZE_TIME, IST, MARKET_CLOSE, MARKET_OPEN
+from .config import DATA_DIR, FREEZE_TIME, IST, MARKET_CLOSE, MARKET_OPEN
+
+FREEZE_FILE = DATA_DIR / "scanner_freeze.json"
 
 log = logging.getLogger("scanner")
 
@@ -124,6 +128,7 @@ class ScannerService:
     def start(self) -> None:
         self._stop.clear()
         self.reload_controls()
+        self._restore_freeze()
         for target in (self._scheduler_loop, self._socket_loop):
             t = threading.Thread(target=target, name=target.__name__, daemon=True)
             t.start()
@@ -205,7 +210,79 @@ class ScannerService:
             self._session_date = None
             self._session_checked = 0.0
             self.rows = {sym: Row(sym) for sym in self.universe}
+        # yesterday's snapshot is stale now
+        try:
+            FREEZE_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
         log.info("new trading day %s - state reset", today)
+
+    # ------------------------------------------------------------------ #
+    # frozen-snapshot persistence — the 10:00 values never change, so a
+    # restart should reload them, not re-fetch ~1000 histories.
+    # ------------------------------------------------------------------ #
+    def _save_freeze(self) -> None:
+        with self._lock:
+            if self.frozen_at is None or self.day is None:
+                return
+            static = {
+                s: [r.s_open, r.s_high, r.s_low, r.s_ltp]
+                for s, r in self.rows.items()
+                if r.s_high is not None
+            }
+            payload = {
+                "day": self.day.isoformat(),
+                "freeze_time": self.freeze_time.strftime("%H:%M"),
+                "frozen_at": self.frozen_at.isoformat(),
+                "static": static,
+            }
+        try:
+            tmp = FREEZE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload))
+            os.replace(tmp, FREEZE_FILE)
+        except OSError:
+            log.warning("freeze snapshot save failed", exc_info=True)
+
+    def _restore_freeze(self) -> None:
+        """Reload today's frozen static section from disk, if the freeze time
+        still matches. Any universe symbols missing from it are queued for a
+        (small) history rebuild."""
+        if not FREEZE_FILE.exists():
+            return
+        try:
+            data = json.loads(FREEZE_FILE.read_text())
+        except (ValueError, OSError):
+            return
+        today = datetime.now(IST).date()
+        if data.get("day") != today.isoformat():
+            return
+        if data.get("freeze_time") != self.freeze_time.strftime("%H:%M"):
+            return
+        static = data.get("static") or {}
+        restored = 0
+        with self._lock:
+            for sym, vals in static.items():
+                row = self.rows.get(sym)
+                if row and isinstance(vals, list) and len(vals) == 4:
+                    row.s_open, row.s_high, row.s_low, row.s_ltp = vals
+                    restored += 1
+            if not restored:
+                return
+            self.day = today
+            try:
+                self.frozen_at = datetime.fromisoformat(data["frozen_at"])
+            except (KeyError, ValueError, TypeError):
+                self.frozen_at = datetime.now(IST)
+            missing = [s for s, r in self.rows.items() if r.s_high is None]
+            if missing:
+                self._rebuild = {
+                    "todo": missing, "tries": {}, "ok": restored, "t0": time.time(),
+                }
+        log.info(
+            "static section restored from snapshot: %d symbols (frozen %s)%s",
+            restored, data.get("frozen_at"),
+            f", {len(missing)} to reconstruct" if missing else "",
+        )
 
     def _seed_from_quotes(self) -> None:
         """Fill yesterday's close and, before the freeze, the forming OHLC."""
@@ -332,6 +409,7 @@ class ScannerService:
                     "static section frozen at %s (live snapshot, %d/%d symbols)",
                     self.frozen_at.strftime("%H:%M:%S"), have, len(symbols),
                 )
+                self._save_freeze()
                 return
             # nothing forming (socket was down / holiday) -> fall through to history
 
@@ -395,6 +473,10 @@ class ScannerService:
                 covered, total, time.time() - rb["t0"],
             )
             self._rebuild = None
+
+        # persist progress so a restart resumes instead of re-fetching
+        if self.frozen_at is not None:
+            self._save_freeze()
 
     def _recompute_live(self) -> None:
         with self._lock:
