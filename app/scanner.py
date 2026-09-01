@@ -469,6 +469,18 @@ class ScannerService:
             )
 
     # ------------------------------------------------------------------ #
+    # cheap views for the buy engine
+    # ------------------------------------------------------------------ #
+    @property
+    def is_frozen(self) -> bool:
+        return self.frozen_at is not None
+
+    def quote_map(self) -> dict[str, tuple[float | None, float | None]]:
+        """{symbol: (frozen 10:00 high, live LTP)} — one cheap locked read."""
+        with self._lock:
+            return {s: (r.s_high, r.ltp) for s, r in self.rows.items()}
+
+    # ------------------------------------------------------------------ #
     # snapshot for the API
     # ------------------------------------------------------------------ #
     def snapshot(self) -> dict:

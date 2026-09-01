@@ -11,6 +11,12 @@
   GET  /controls            broker details + scanner controls (landing page)
   POST /controls/universe   validate + save the universe
   POST /controls/freeze-time  set the static-section freeze time (IST)
+  POST /controls/engine     save the buy-engine settings
+  GET  /engine              buy-engine dashboard (positions, P&L, arm/kill)
+  GET  /api/engine/state    one-shot engine snapshot (JSON)
+  GET  /api/engine/stream   engine snapshot stream (SSE, ~1.5s)
+  POST /engine/start        arm the engine (take new signals)
+  POST /engine/kill         disarm (stop new entries; keep managing open ones)
   GET  /api/scanner/state   one-shot scanner snapshot (JSON)
   GET  /api/scanner/stream  scanner snapshot stream (SSE, ~1s)
   GET  /api/positions/state day positions + live P&L + available balance (JSON)
@@ -23,7 +29,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import secrets
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -54,17 +62,38 @@ from .fyers import (
 )
 from .marketdata import MarketDataError
 from .scanner import scanner
+from .engine import engine
 from . import positions as positions_svc
 
 BASE = Path(__file__).resolve().parent
 
 
+def _setup_logging() -> None:
+    """Send the scanner / engine INFO logs to stdout (journald picks them up).
+
+    Uvicorn only configures its own loggers; without this the trading engine
+    would run with no audit trail.
+    """
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(name)s: %(message)s", "%H:%M:%S"))
+    for name in ("scanner", "engine"):
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.INFO)
+        lg.handlers = [handler]
+        lg.propagate = False
+
+
+_setup_logging()
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
     scanner.start()
+    engine.start()
     try:
         yield
     finally:
+        engine.stop()
         scanner.stop()
 
 
@@ -375,7 +404,7 @@ async def controls_page(request: Request):
         _ctx(request, data=data, profile=profile, funds=funds,
              connected_ist=connected_ist,
              universe_raw=raw, universe=cfg.get("universe", []),
-             freeze_time=cfg.get("freeze_time"),
+             freeze_time=cfg.get("freeze_time"), cfg=cfg,
              market_open=MARKET_OPEN.strftime("%H:%M"),
              market_close=MARKET_CLOSE.strftime("%H:%M"),
              results=request.session.pop("_validation", None)),
@@ -431,6 +460,80 @@ async def save_freeze_time(request: Request, freeze_time: str = Form("")):
     scanner.reload_controls()
     _flash(request, f"Freeze time set to {value} IST.", "success")
     return RedirectResponse("/controls", status_code=303)
+
+
+@app.post("/controls/engine")
+async def save_engine_controls(request: Request):
+    if not await active_session():
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+
+    form = dict(await request.form())
+    values, errors = controls.parse_engine(form)
+    if errors:
+        for e in errors:
+            _flash(request, e)
+        return RedirectResponse("/controls", status_code=303)
+
+    controls.save(values)
+    _flash(request, "Buy-engine settings saved.", "success")
+    return RedirectResponse("/controls", status_code=303)
+
+
+# --------------------------------------------------------------------------- #
+# buy engine
+# --------------------------------------------------------------------------- #
+@app.get("/engine", response_class=HTMLResponse)
+async def engine_page(request: Request):
+    if not await active_session():
+        request.session.clear()
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "engine.html", _ctx(request))
+
+
+@app.get("/api/engine/state")
+async def engine_state():
+    return engine.snapshot()
+
+
+@app.get("/api/engine/stream")
+async def engine_stream(request: Request):
+    async def gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                yield f"data: {json.dumps(engine.snapshot(), default=str)}\n\n"
+                await asyncio.sleep(1.5)
+        except asyncio.CancelledError:
+            raise
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/engine/start")
+async def engine_start(request: Request):
+    if not await active_session():
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+    engine.set_armed(True)
+    _flash(request, "Engine armed — watching for 10:00 breakouts.", "success")
+    return RedirectResponse("/engine", status_code=303)
+
+
+@app.post("/engine/kill")
+async def engine_kill(request: Request):
+    if not await active_session():
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+    engine.set_armed(False)
+    _flash(request, "Engine killed — no new entries. Open positions still managed.", "success")
+    return RedirectResponse("/engine", status_code=303)
 
 
 # --------------------------------------------------------------------------- #

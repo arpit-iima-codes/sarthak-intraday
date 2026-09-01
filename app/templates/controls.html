@@ -89,8 +89,78 @@
   </form>
 </div>
 
-<div class="card card-muted">
-  <h2>More controls</h2>
-  <p>Additional scanner settings will be added here.</p>
+<div class="card">
+  <div class="card-head">
+    <span class="eyebrow">Buy Engine</span>
+    <h1>10:00-breakout settings</h1>
+    <p class="sub">The engine buys a scanner symbol the moment its live price
+       crosses above its frozen {{ freeze_time }} high, sized to the budget
+       below. Arm / kill it on the <a href="/engine">Engine</a> page.</p>
+  </div>
+
+  <form method="post" action="/controls/engine" class="form">
+    <div class="field-row">
+      <div class="field">
+        <label for="engine_mode">Mode</label>
+        <select id="engine_mode" name="engine_mode">
+          <option value="paper" {{ 'selected' if cfg.engine_mode == 'paper' }}>Paper (simulated fills)</option>
+          <option value="live" {{ 'selected' if cfg.engine_mode == 'live' }}>Live (real Fyers orders)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="engine_style">Trade style</label>
+        <select id="engine_style" name="engine_style">
+          <option value="bracket" {{ 'selected' if cfg.engine_style == 'bracket' }}>Bracket — target / stop</option>
+          <option value="eod" {{ 'selected' if cfg.engine_style == 'eod' }}>Hold till session end</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="engine_budget">Budget per trade (₹)</label>
+        <input id="engine_budget" name="engine_budget" type="number" min="1" step="1"
+               value="{{ cfg.engine_budget }}" required>
+      </div>
+      <div class="field">
+        <label for="engine_total_capital">Total capital (₹)</label>
+        <input id="engine_total_capital" name="engine_total_capital" type="number" min="1" step="1"
+               value="{{ cfg.engine_total_capital }}" required>
+        <span class="hint">Capped by the live available balance.</span>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="engine_target_pct">Target %</label>
+        <input id="engine_target_pct" name="engine_target_pct" type="number" min="0.01" step="0.01"
+               value="{{ cfg.engine_target_pct }}" required>
+      </div>
+      <div class="field">
+        <label for="engine_stop_pct">Stop-loss %</label>
+        <input id="engine_stop_pct" name="engine_stop_pct" type="number" min="0.01" step="0.01"
+               value="{{ cfg.engine_stop_pct }}" required>
+      </div>
+      <div class="field">
+        <label for="engine_max_positions">Max positions</label>
+        <input id="engine_max_positions" name="engine_max_positions" type="number" min="1" step="1"
+               value="{{ cfg.engine_max_positions }}" required>
+      </div>
+      <div class="field">
+        <label for="engine_square_off">Square-off (IST)</label>
+        <input id="engine_square_off" name="engine_square_off" type="time"
+               value="{{ cfg.engine_square_off }}"
+               min="{{ market_open }}" max="{{ market_close }}" required>
+      </div>
+    </div>
+
+    <label class="check">
+      <input type="checkbox" name="engine_arm_next_session" value="on"
+             {{ 'checked' if cfg.engine_arm_next_session }}>
+      Arm automatically at the start of the next trading day
+    </label>
+
+    <button type="submit" class="btn btn-primary btn-block">Save engine settings</button>
+  </form>
 </div>
 {% endblock %}

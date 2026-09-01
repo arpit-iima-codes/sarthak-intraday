@@ -17,7 +17,21 @@ DEFAULTS: dict = {
     "universe": [],          # list of normalised Fyers symbols
     "universe_raw": "",      # what the user last typed (for the textarea)
     "freeze_time": FREEZE_TIME.strftime("%H:%M"),  # IST HH:MM
+
+    # --- buy engine (10:00-breakout) ---
+    "engine_mode": "paper",            # paper | live
+    "engine_arm_next_session": False,  # auto-arm the engine at the next day's open
+    "engine_budget": 5000.0,           # rupees deployed per position
+    "engine_total_capital": 15000.0,   # ceiling across all open positions
+    "engine_target_pct": 1.0,          # bracket take-profit, % of entry
+    "engine_stop_pct": 0.5,            # bracket stop-loss, % of entry
+    "engine_max_positions": 3,         # max simultaneous open positions
+    "engine_style": "bracket",         # bracket (target/stop) | eod (hold to close)
+    "engine_square_off": "15:15",      # IST HH:MM — force-exit / stop new entries
 }
+
+ENGINE_STYLES = ("bracket", "eod")
+ENGINE_MODES = ("paper", "live")
 
 
 def load() -> dict:
@@ -60,6 +74,69 @@ def parse_freeze_time(raw: str) -> str:
             f"must be between {MARKET_OPEN:%H:%M} and {MARKET_CLOSE:%H:%M} IST"
         )
     return f"{h:02d}:{mi:02d}"
+
+
+def parse_engine(form: dict) -> tuple[dict, list[str]]:
+    """Validate the buy-engine settings form. Returns (clean_values, errors).
+
+    Only keys that validated are returned; on any error nothing is saved.
+    """
+    errors: list[str] = []
+    out: dict = {}
+
+    mode = str(form.get("engine_mode", "")).strip().lower()
+    if mode not in ENGINE_MODES:
+        errors.append("Mode must be 'paper' or 'live'.")
+    else:
+        out["engine_mode"] = mode
+
+    style = str(form.get("engine_style", "")).strip().lower()
+    if style not in ENGINE_STYLES:
+        errors.append("Trade style must be 'bracket' or 'eod'.")
+    else:
+        out["engine_style"] = style
+
+    out["engine_arm_next_session"] = str(
+        form.get("engine_arm_next_session", "")
+    ).strip().lower() in ("1", "true", "on", "yes")
+
+    def _pos_float(key: str, label: str) -> None:
+        raw = form.get(key)
+        try:
+            v = round(float(raw), 2)
+        except (TypeError, ValueError):
+            errors.append(f"{label} must be a number.")
+            return
+        if v <= 0:
+            errors.append(f"{label} must be greater than 0.")
+            return
+        out[key] = v
+
+    _pos_float("engine_budget", "Budget per trade")
+    _pos_float("engine_total_capital", "Total capital")
+    _pos_float("engine_target_pct", "Target %")
+    _pos_float("engine_stop_pct", "Stop-loss %")
+
+    if "engine_budget" in out and "engine_total_capital" in out:
+        if out["engine_budget"] > out["engine_total_capital"]:
+            errors.append("Budget per trade can't exceed total capital.")
+
+    try:
+        mp = int(float(form.get("engine_max_positions")))
+        if mp < 1:
+            raise ValueError
+        out["engine_max_positions"] = mp
+    except (TypeError, ValueError):
+        errors.append("Max positions must be a whole number of at least 1.")
+
+    try:
+        out["engine_square_off"] = parse_freeze_time(form.get("engine_square_off", ""))
+    except ValueError as exc:
+        errors.append(f"Square-off time — {exc}.")
+
+    if errors:
+        return {}, errors
+    return out, []
 
 
 def parse_universe(text: str) -> list[str]:

@@ -213,7 +213,7 @@ h2 {
 }
 .form-inline .btn-primary { width: auto; margin-top: 0; }
 .field { display: flex; flex-direction: column; gap: 8px; flex: 1; }
-.field-row { display: flex; gap: 16px; }
+.field-row { display: flex; gap: 16px; align-items: flex-start; }
 
 label {
   font-size: 11px;
@@ -768,4 +768,67 @@ textarea:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px
 
   .stat-val { font-size: 17px; }
   .pos-stats .stat { padding: 12px 14px; }
+}
+
+/* ---------- buy engine ---------- */
+select {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--input-bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+input[type="time"], input[type="number"] { font-family: var(--mono); color-scheme: dark; }
+:root[data-theme="light"] input[type="time"],
+:root[data-theme="light"] input[type="number"],
+:root[data-theme="light"] select { color-scheme: light; }
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--ink-dim);
+  font-weight: 400;
+}
+.check input { width: auto; }
+
+.eng-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.eng-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.eng-status .badge { margin-left: 0; }
+.eng-status .status-text { font-size: 15px; }
+.eng-actions { display: flex; gap: 8px; }
+.eng-actions .btn { width: auto; margin-top: 0; }
+
+.pulse.off { background: var(--ink-faint); animation: none; }
+.badge-live {
+  color: #f0cccc;
+  background: rgba(217, 138, 138, 0.12);
+  border-color: rgba(217, 138, 138, 0.45);
+}
+
+.eng-stats { margin-bottom: 22px; }
+.eng-stats .stat { flex: 1; min-width: 120px; }
+
+/* content links (nav / buttons opt out with their own classes) */
+.sub a, .hint a, .card p a, .card-muted a, .pos-empty a {
+  color: var(--gold-bright);
+  text-decoration: none;
+  border-bottom: 1px solid var(--gold-soft);
+}
+.sub a:hover, .hint a:hover, .card p a:hover, .card-muted a:hover, .pos-empty a:hover {
+  border-bottom-color: var(--gold);
 }
