@@ -49,10 +49,10 @@
     const p = d.pnl || {};
     const realised = $("eng-realised");
     realised.textContent = money(p.realised);
-    realised.className = dir(p.realised);
+    realised.className = "stat-val " + dir(p.realised);
     const unreal = $("eng-unrealised");
     unreal.textContent = money(p.unrealised);
-    unreal.className = dir(p.unrealised);
+    unreal.className = "stat-val " + dir(p.unrealised);
 
     const c = d.counts || {};
     $("eng-slots").textContent = `${c.open ?? "—"}/${c.max_positions ?? "—"}`;
