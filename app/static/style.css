@@ -830,9 +830,8 @@ input[type="time"], input[type="number"] { font-family: var(--mono); color-schem
   transition: border-color 0.15s, filter 0.15s;
 }
 .eng-mode-toggle:hover { border-color: var(--gold); filter: brightness(1.12); }
-.eng-strip-btns { display: flex; gap: 6px; margin-left: auto; }
+.eng-strip-btns { margin-left: auto; }
 .eng-strip-btns .btn { width: auto; margin-top: 0; }
-.eng-strip-btns form { display: inline; }
 
 .eng-strip-nums {
   display: flex;

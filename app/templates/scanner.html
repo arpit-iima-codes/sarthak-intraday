@@ -48,14 +48,9 @@
                   title="Switch paper / live">—</button>
         </form>
         <span class="chip chip-dim" id="eng-style">—</span>
-        <span class="eng-strip-btns">
-          <form method="post" action="/engine/start" class="topbar-form">
-            <button type="submit" class="btn btn-primary btn-sm">Start</button>
-          </form>
-          <form method="post" action="/engine/kill" class="topbar-form">
-            <button type="submit" class="btn btn-ghost btn-sm">Kill</button>
-          </form>
-        </span>
+        <form method="post" action="/engine/toggle" class="topbar-form eng-strip-btns">
+          <button type="submit" class="btn btn-sm" id="eng-toggle">—</button>
+        </form>
       </div>
       <div class="eng-strip-nums">
         <span>Free <b id="eng-free">—</b></span>

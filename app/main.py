@@ -13,10 +13,9 @@
   POST /controls/freeze-time  set the static-section freeze time (IST)
   POST /controls/engine     save the buy-engine settings
   POST /engine/mode         switch the engine between paper and live
+  POST /engine/toggle       arm <-> disarm (disarm keeps managing open positions)
   GET  /api/engine/state    one-shot engine snapshot (JSON)
   GET  /api/engine/stream   engine snapshot stream (SSE, ~1.5s)
-  POST /engine/start        arm the engine (take new signals)
-  POST /engine/kill         disarm (stop new entries; keep managing open ones)
   GET  /api/scanner/state   one-shot scanner snapshot (JSON)
   GET  /api/scanner/stream  scanner snapshot stream (SSE, ~1s)
   GET  /api/positions/state day positions + live P&L + available balance (JSON)
@@ -529,23 +528,17 @@ async def engine_mode(request: Request, mode: str = Form("")):
     return RedirectResponse("/scanner", status_code=303)
 
 
-@app.post("/engine/start")
-async def engine_start(request: Request):
+@app.post("/engine/toggle")
+async def engine_toggle(request: Request):
     if not await active_session():
         _flash(request, "Not connected. Please sign in.")
         return RedirectResponse("/", status_code=303)
-    engine.set_armed(True)
-    _flash(request, "Engine armed — watching for 10:00 breakouts.", "success")
-    return RedirectResponse("/scanner", status_code=303)
-
-
-@app.post("/engine/kill")
-async def engine_kill(request: Request):
-    if not await active_session():
-        _flash(request, "Not connected. Please sign in.")
-        return RedirectResponse("/", status_code=303)
-    engine.set_armed(False)
-    _flash(request, "Engine killed — no new entries. Open positions still managed.", "success")
+    now_armed = not engine.armed
+    engine.set_armed(now_armed)
+    if now_armed:
+        _flash(request, "Engine armed — watching for 10:00 breakouts.", "success")
+    else:
+        _flash(request, "Engine killed — no new entries. Open positions still managed.", "success")
     return RedirectResponse("/scanner", status_code=303)
 
 

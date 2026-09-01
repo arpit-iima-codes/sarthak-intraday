@@ -37,6 +37,10 @@
     $("eng-dot").className = "pulse" + (armed ? "" : " off");
     $("eng-state").textContent = armed ? "Engine armed" : "Engine killed";
 
+    const tgl = $("eng-toggle");
+    tgl.textContent = armed ? "Kill engine" : "Start engine";
+    tgl.className = "btn btn-sm " + (armed ? "btn-ghost" : "btn-primary");
+
     const live = d.mode === "live";
     const modeBtn = $("eng-mode");
     modeBtn.textContent = String(d.mode || "").toUpperCase();
