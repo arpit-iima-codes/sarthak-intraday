@@ -12,7 +12,6 @@
   POST /controls/universe   validate + save the universe
   POST /controls/freeze-time  set the static-section freeze time (IST)
   POST /controls/engine     save the buy-engine settings
-  GET  /engine              buy-engine dashboard (positions, P&L, arm/kill)
   GET  /api/engine/state    one-shot engine snapshot (JSON)
   GET  /api/engine/stream   engine snapshot stream (SSE, ~1.5s)
   POST /engine/start        arm the engine (take new signals)
@@ -481,15 +480,11 @@ async def save_engine_controls(request: Request):
 
 
 # --------------------------------------------------------------------------- #
-# buy engine
+# buy engine  (UI lives in the /scanner right pane)
 # --------------------------------------------------------------------------- #
-@app.get("/engine", response_class=HTMLResponse)
-async def engine_page(request: Request):
-    if not await active_session():
-        request.session.clear()
-        _flash(request, "Not connected. Please sign in.")
-        return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "engine.html", _ctx(request))
+@app.get("/engine")
+async def engine_page_moved():
+    return RedirectResponse("/scanner", status_code=301)
 
 
 @app.get("/api/engine/state")
@@ -523,7 +518,7 @@ async def engine_start(request: Request):
         return RedirectResponse("/", status_code=303)
     engine.set_armed(True)
     _flash(request, "Engine armed — watching for 10:00 breakouts.", "success")
-    return RedirectResponse("/engine", status_code=303)
+    return RedirectResponse("/scanner", status_code=303)
 
 
 @app.post("/engine/kill")
@@ -533,7 +528,7 @@ async def engine_kill(request: Request):
         return RedirectResponse("/", status_code=303)
     engine.set_armed(False)
     _flash(request, "Engine killed — no new entries. Open positions still managed.", "success")
-    return RedirectResponse("/engine", status_code=303)
+    return RedirectResponse("/scanner", status_code=303)
 
 
 # --------------------------------------------------------------------------- #

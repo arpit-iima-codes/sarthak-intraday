@@ -36,8 +36,32 @@
     </div>
   </section>
 
-  <!-- ---------------- right: day positions ---------------- -->
+  <!-- ---------------- right: buy engine + day positions ---------------- -->
   <aside class="pos-pane">
+    <div class="eng-strip" id="eng-strip" hidden>
+      <div class="eng-strip-top">
+        <span class="pulse" id="eng-dot"></span>
+        <span class="eng-strip-state" id="eng-state">—</span>
+        <span class="badge" id="eng-mode">—</span>
+        <span class="chip chip-dim" id="eng-style">—</span>
+        <span class="eng-strip-btns">
+          <form method="post" action="/engine/start" class="topbar-form">
+            <button type="submit" class="btn btn-primary btn-sm">Start</button>
+          </form>
+          <form method="post" action="/engine/kill" class="topbar-form">
+            <button type="submit" class="btn btn-ghost btn-sm">Kill</button>
+          </form>
+        </span>
+      </div>
+      <div class="eng-strip-nums">
+        <span>Day P&amp;L <b id="eng-pnl">—</b></span>
+        <span>Open <b id="eng-slots">—</b></span>
+        <span>Free <b id="eng-free">—</b></span>
+        <span class="chip chip-dim" id="eng-pending" hidden></span>
+      </div>
+      <p class="eng-strip-note" id="eng-note"></p>
+    </div>
+
     <div class="pos-stats">
       <div class="stat">
         <span class="stat-label">Live P&amp;L</span>
@@ -78,4 +102,5 @@
 {% block scripts %}
 <script src="/static/scanner.js"></script>
 <script src="/static/positions.js"></script>
+<script src="/static/engine.js"></script>
 {% endblock %}

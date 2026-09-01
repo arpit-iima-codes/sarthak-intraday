@@ -10,8 +10,7 @@ official `fyers-apiv3` package.
 |-------------|------|
 | `/`         | Fyers OAuth login |
 | `/dashboard`| account name + available/total balance |
-| `/scanner`  | daily live scanner (below) |
-| `/engine`   | buy engine — 10:00-breakout entries, positions, P&L, arm/kill |
+| `/scanner`  | daily live scanner + buy-engine strip (arm/kill, P&L) in the right pane |
 | `/controls` | scanner + engine controls |
 
 ## Layout
@@ -27,8 +26,8 @@ app/
   engine.py      BuyEngine — 10:00-breakout entries, target/stop/EOD exits, paper|live
   orders.py      Fyers INTRADAY market orders + available balance (live mode)
   session.py     broker session -> data/broker_session.json
-  templates/     base, login, scanner, engine, controls
-  static/        style.css, scanner.js, engine.js
+  templates/     base, login, scanner, controls
+  static/        style.css, scanner.js, engine.js (right-pane strip), positions.js
 deploy/
   sarthak-intraday.service   systemd unit (uvicorn, ONE worker, :8092)
   nginx.conf                 reverse proxy for 80.225.196.44.nip.io (HTTPS)
@@ -88,9 +87,10 @@ fixed rupee budget (`qty = floor(budget / ltp)`).
 - **One entry per symbol per day** — win or lose, it's done.
 - **Modes:** `paper` simulates fills at the live price; `live` places Fyers
   INTRADAY market orders. Switch on `/controls`.
-- **Arm / Kill** on `/engine`. Kill stops *new* entries only — open positions
-  keep being managed to their exit. "Arm automatically at the start of the next
-  trading day" on `/controls` sets the default each morning.
+- **Arm / Kill** from the strip at the top of the `/scanner` right pane. Kill
+  stops *new* entries only — open positions keep being managed to their exit.
+  "Arm automatically at the start of the next trading day" on `/controls` sets
+  the default each morning.
 - Runtime state → `data/engine_state.json` (mid-day restart resumes managing
   open positions); the previous day's book → `data/engine_history/<date>.json`.
 
