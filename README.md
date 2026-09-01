@@ -27,7 +27,7 @@ app/
   orders.py      Fyers INTRADAY market orders + available balance (live mode)
   session.py     broker session -> data/broker_session.json
   templates/     base, login, scanner, controls
-  static/        style.css, scanner.js, engine.js (right-pane strip), positions.js
+  static/        style.css, scanner.js, engine.js (right-pane strip + positions)
 deploy/
   sarthak-intraday.service   systemd unit (uvicorn, ONE worker, :8092)
   nginx.conf                 reverse proxy for 80.225.196.44.nip.io (HTTPS)

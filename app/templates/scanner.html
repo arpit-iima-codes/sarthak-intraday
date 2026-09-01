@@ -87,14 +87,16 @@
             <th class="col-sym">Symbol</th>
             <th>Qty</th>
             <th>Entry</th>
+            <th>LTP</th>
             <th>Target</th>
-            <th>SL</th>
+            <th>Stop</th>
             <th>PnL</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody id="pos-rows"></tbody>
       </table>
-      <p class="pos-empty" id="pos-empty" hidden>No open positions today.</p>
+      <p class="pos-empty" id="pos-empty" hidden>No trades yet today.</p>
     </div>
   </aside>
 
@@ -103,6 +105,5 @@
 
 {% block scripts %}
 <script src="/static/scanner.js"></script>
-<script src="/static/positions.js"></script>
 <script src="/static/engine.js"></script>
 {% endblock %}

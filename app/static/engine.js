@@ -24,11 +24,18 @@
     v === null || v === undefined || Number.isNaN(v)
       ? "—"
       : Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const inr2 = (v) => inr(v, 2);
   const money = (v) =>
     v === null || v === undefined
       ? "—"
       : (v < 0 ? "−" : v > 0 ? "+" : "") + "₹" + inr(Math.abs(v), 0);
+  const signed = (v) =>
+    v === null || v === undefined
+      ? "—"
+      : (v < 0 ? "−" : v > 0 ? "+" : "") + "₹" + inr(Math.abs(v), 2);
   const dir = (v) => (v === null || v === undefined || v === 0 ? "" : v > 0 ? "up" : "down");
+  const disp = (s) => String(s || "").replace(/^[A-Z]+:/, "").replace(/-(EQ|INDEX)$/, "");
+  const REASON = { target: "target ✓", stop: "stop ✕", eod: "squared off", kill: "closed" };
 
   function render(d) {
     strip.hidden = false;
@@ -60,12 +67,42 @@
 
     const c = d.counts || {};
     $("eng-slots").textContent = `Open ${c.open ?? "—"} / ${c.max_positions ?? "—"}`;
-    $("eng-free").textContent = d.capital ? "₹" + inr(d.capital.free) : "—";
+    const cap = d.capital || {};
+    $("eng-free").textContent = cap.free != null ? "₹" + inr(cap.free) : "—";
+    const bal = $("pos-bal");
+    if (bal) bal.textContent = cap.available_balance != null ? "₹" + inr(cap.available_balance) : "—";
 
     const pend = d.pending || [];
     const pe = $("eng-pending");
     pe.hidden = pend.length === 0;
     pe.textContent = pend.length ? `queued: ${pend.join(", ")}` : "";
+
+    // positions table
+    const rows = d.positions || [];
+    const emptyEl = $("pos-empty");
+    if (emptyEl) emptyEl.hidden = rows.length > 0;
+    const body = $("pos-rows");
+    if (body) {
+      body.innerHTML = rows
+        .map((p) => {
+          const open = p.status === "open";
+          const px = open ? p.ltp : p.exit_price;
+          const status = open
+            ? '<span class="chip chip-ok">open</span>'
+            : `<span class="chip chip-dim">${REASON[p.exit_reason] || "closed"}</span>`;
+          return `<tr class="${open ? "" : "closed"}">
+            <td class="col-sym" title="${p.symbol}">${disp(p.symbol)}</td>
+            <td class="num">${p.qty}</td>
+            <td class="num">${inr2(p.entry_price)}</td>
+            <td class="num">${inr2(px)}</td>
+            <td class="num dim">${inr2(p.target_price)}</td>
+            <td class="num dim">${inr2(p.stop_price)}</td>
+            <td class="num ${dir(p.pnl)}">${signed(p.pnl)}</td>
+            <td>${status}</td>
+          </tr>`;
+        })
+        .join("");
+    }
 
     let note = "";
     if (!d.in_session) note = "Market closed — engine idle.";
