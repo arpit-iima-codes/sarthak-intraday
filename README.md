@@ -88,10 +88,10 @@ fixed rupee budget (`qty = floor(budget / ltp)`).
 - **Modes:** `paper` simulates fills at the live price; `live` places Fyers
   INTRADAY market orders. Switch on `/controls`, or tap the `PAPER`/`LIVE`
   badge in the scanner strip (going live asks for confirmation).
-- **Arm / Kill** from the strip at the top of the `/scanner` right pane. Kill
-  stops *new* entries only — open positions keep being managed to their exit.
-  "Arm automatically at the start of the next trading day" on `/controls` sets
-  the default each morning.
+- **Start / Kill** — one toggle button in the strip at the top of the
+  `/scanner` right pane. Kill stops *new* entries only — open positions keep
+  being managed to their exit. "Arm automatically at the start of the next
+  trading day" on `/controls` sets the default each morning.
 - Runtime state → `data/engine_state.json` (mid-day restart resumes managing
   open positions); the previous day's book → `data/engine_history/<date>.json`.
 
