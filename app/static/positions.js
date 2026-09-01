@@ -3,7 +3,6 @@
 
   const $ = (id) => document.getElementById(id);
   const rowsEl = $("pos-rows");
-  const pnlEl = $("pos-pnl");
   const balEl = $("pos-bal");
   const emptyEl = $("pos-empty");
   const errEl = $("pos-err");
@@ -15,10 +14,6 @@
       ? "—"
       : Number(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
   const signed = (v) => (v === null || v === undefined ? "—" : (v > 0 ? "+" : "") + inr(v));
-  const money = (v) =>
-    v === null || v === undefined
-      ? "—"
-      : (v < 0 ? "−" : v > 0 ? "+" : "") + "₹" + inr(Math.abs(v), 0);
   const dir = (v) => (v === null || v === undefined || v === 0 ? "" : v > 0 ? "up" : "down");
   const disp = (s) => String(s || "").replace(/^[A-Z]+:/, "").replace(/-(EQ|INDEX)$/, "");
 
@@ -27,8 +22,6 @@
     errEl.textContent = msg;
     errEl.hidden = !msg;
 
-    pnlEl.textContent = money(d.pnl);
-    pnlEl.className = "stat-val " + dir(d.pnl);
     balEl.textContent =
       d.available_balance === null || d.available_balance === undefined
         ? "—"

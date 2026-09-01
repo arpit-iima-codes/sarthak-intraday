@@ -47,9 +47,12 @@
     $("eng-style").textContent = d.style === "eod" ? "hold to close" : "bracket";
 
     const p = d.pnl || {};
-    const pnl = $("eng-pnl");
-    pnl.textContent = money(p.total);
-    pnl.className = dir(p.total);
+    const realised = $("eng-realised");
+    realised.textContent = money(p.realised);
+    realised.className = dir(p.realised);
+    const unreal = $("eng-unrealised");
+    unreal.textContent = money(p.unrealised);
+    unreal.className = dir(p.unrealised);
 
     const c = d.counts || {};
     $("eng-slots").textContent = `${c.open ?? "—"}/${c.max_positions ?? "—"}`;
