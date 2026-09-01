@@ -42,7 +42,11 @@
       <div class="eng-strip-top">
         <span class="pulse" id="eng-dot"></span>
         <span class="eng-strip-state" id="eng-state">—</span>
-        <span class="badge" id="eng-mode">—</span>
+        <form method="post" action="/engine/mode" id="eng-mode-form" class="topbar-form">
+          <input type="hidden" name="mode" id="eng-mode-target" value="">
+          <button type="submit" class="badge eng-mode-toggle" id="eng-mode"
+                  title="Switch paper / live">—</button>
+        </form>
         <span class="chip chip-dim" id="eng-style">—</span>
         <span class="eng-strip-btns">
           <form method="post" action="/engine/start" class="topbar-form">

@@ -86,7 +86,8 @@ fixed rupee budget (`qty = floor(budget / ltp)`).
   falls back below the 10:00 high first).
 - **One entry per symbol per day** — win or lose, it's done.
 - **Modes:** `paper` simulates fills at the live price; `live` places Fyers
-  INTRADAY market orders. Switch on `/controls`.
+  INTRADAY market orders. Switch on `/controls`, or tap the `PAPER`/`LIVE`
+  badge in the scanner strip (going live asks for confirmation).
 - **Arm / Kill** from the strip at the top of the `/scanner` right pane. Kill
   stops *new* entries only — open positions keep being managed to their exit.
   "Arm automatically at the start of the next trading day" on `/controls` sets

@@ -12,6 +12,7 @@
   POST /controls/universe   validate + save the universe
   POST /controls/freeze-time  set the static-section freeze time (IST)
   POST /controls/engine     save the buy-engine settings
+  POST /engine/mode         switch the engine between paper and live
   GET  /api/engine/state    one-shot engine snapshot (JSON)
   GET  /api/engine/stream   engine snapshot stream (SSE, ~1.5s)
   POST /engine/start        arm the engine (take new signals)
@@ -509,6 +510,23 @@ async def engine_stream(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/engine/mode")
+async def engine_mode(request: Request, mode: str = Form("")):
+    if not await active_session():
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+    mode = mode.strip().lower()
+    if mode not in controls.ENGINE_MODES:
+        _flash(request, "Unknown engine mode.")
+        return RedirectResponse("/scanner", status_code=303)
+    controls.save({"engine_mode": mode})
+    if mode == "live":
+        _flash(request, "Engine switched to LIVE — real Fyers orders from the next entry.", "success")
+    else:
+        _flash(request, "Engine switched to PAPER — fills are simulated.", "success")
+    return RedirectResponse("/scanner", status_code=303)
 
 
 @app.post("/engine/start")

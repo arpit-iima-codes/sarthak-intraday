@@ -7,6 +7,19 @@
 
   const POLL_MS = 2000;
 
+  // confirm before arming live orders (target is set by render())
+  const modeForm = $("eng-mode-form");
+  if (modeForm) {
+    modeForm.addEventListener("submit", (e) => {
+      if (
+        $("eng-mode-target").value === "live" &&
+        !confirm("Switch the engine to LIVE? Real Fyers orders will be placed on the next entry.")
+      ) {
+        e.preventDefault();
+      }
+    });
+  }
+
   const inr = (v, d = 0) =>
     v === null || v === undefined || Number.isNaN(v)
       ? "—"
@@ -23,8 +36,14 @@
     const armed = !!d.armed;
     $("eng-dot").className = "pulse" + (armed ? "" : " off");
     $("eng-state").textContent = armed ? "Engine armed" : "Engine killed";
-    $("eng-mode").textContent = String(d.mode || "").toUpperCase();
-    $("eng-mode").className = "badge" + (d.mode === "live" ? " badge-live" : "");
+
+    const live = d.mode === "live";
+    const modeBtn = $("eng-mode");
+    modeBtn.textContent = String(d.mode || "").toUpperCase();
+    modeBtn.className = "badge eng-mode-toggle" + (live ? " badge-live" : "");
+    modeBtn.title = live ? "Switch to paper" : "Switch to live orders";
+    $("eng-mode-target").value = live ? "paper" : "live";
+
     $("eng-style").textContent = d.style === "eod" ? "hold to close" : "bracket";
 
     const p = d.pnl || {};
