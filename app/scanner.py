@@ -32,8 +32,10 @@ log = logging.getLogger("scanner")
 
 STALE_FEED_SECONDS = 90        # no ticks this long while connected -> rebuild
 SEED_INTERVAL = 5             # seconds between pre-freeze quote refreshes
-FREEZE_WORKERS = 5           # parallel 1-min-history fetches during a rebuild
-FREEZE_RATE = 5             # ...capped to this many history calls/sec (Fyers limit)
+FREEZE_WORKERS = 4           # parallel 1-min-history fetches during a rebuild
+FREEZE_RATE = 3             # ...capped to this many history calls/sec (Fyers limit)
+REBUILD_CHUNK = 60          # symbols reconstructed per scheduler pass
+REBUILD_MAX_TRIES = 4       # give up on a symbol's history after this many passes
 SUBSCRIBE_BATCH = 500        # symbols per subscribe/unsubscribe call
 SUBSCRIBE_PAUSE = 0.3        # seconds between subscribe batches (server breathing room)
 
@@ -101,6 +103,7 @@ class ScannerService:
         self.frozen_at: datetime | None = None
         self._boot_ist = datetime.now(IST)   # were we up before the freeze time?
         self._freeze_gate = _RateGate(FREEZE_RATE)
+        self._rebuild: dict | None = None   # in-progress mid-day history rebuild
         self._need_refreeze = False       # freeze time moved into the past
         self._last_seed = 0.0
         self._data_epoch = 0.0            # last-trade time seen in quotes/ticks
@@ -185,9 +188,9 @@ class ScannerService:
 
     def _forming(self) -> bool:
         """True while the static section still accumulates from quotes/ticks.
-        Once frozen (frozen_at set) the static columns are locked to the
-        1-minute-history snapshot and never take live ticks again."""
-        return self.frozen_at is None
+        Once frozen (frozen_at set) — or once a mid-day history rebuild has
+        started — the static columns are locked and never take live ticks."""
+        return self.frozen_at is None and self._rebuild is None
 
     def _ensure_day(self) -> None:
         today = datetime.now(IST).date()
@@ -196,6 +199,7 @@ class ScannerService:
                 return
             self.day = today
             self.frozen_at = None
+            self._rebuild = None
             self._last_seed = 0.0
             self._data_epoch = 0.0
             self._session_date = None
@@ -264,18 +268,21 @@ class ScannerService:
                 row.live_pct = _pct(row.ltp, row.s_high)
 
     def _freeze_one(self, auth: str, sym: str, cutoff: int):
-        """Fetch one symbol's pre-freeze OHLC. Returns (sym, (o,h,l,c)) or (sym, None)."""
+        """Fetch one symbol's pre-freeze OHLC. Returns (sym, (o,h,l,c)) or (sym, None).
+
+        One quick retry only — the caller re-queues persistent failures across
+        passes, which spreads load better when Fyers is rate-limiting.
+        """
         candles = None
-        for attempt in range(5):
+        for attempt in range(2):
             self._freeze_gate.wait()
             try:
                 candles = marketdata.history_1m(auth, sym, self.day)
                 break
-            except marketdata.MarketDataError as exc:
-                if attempt == 4:
-                    log.warning("freeze history failed for %s: %s", sym, exc)
+            except marketdata.MarketDataError:
+                if attempt == 1:
                     return sym, None
-                time.sleep(0.5 * (attempt + 1))   # transient / rate-limit backoff
+                time.sleep(0.6)
         pre = [c for c in (candles or []) if c and c[0] < cutoff]
         if not pre:
             return sym, None
@@ -289,7 +296,8 @@ class ScannerService:
     def _maybe_freeze(self) -> None:
         now = datetime.now(IST)
         freeze_time = self.freeze_time
-        if self.frozen_at is not None and not self._need_refreeze:
+        # keep going while a mid-day history rebuild is still draining
+        if self.frozen_at is not None and not self._need_refreeze and self._rebuild is None:
             return
         if now.weekday() >= 5 or now.time() < freeze_time:
             return
@@ -307,7 +315,11 @@ class ScannerService:
         # Fast path: if we were already running before the freeze time, the
         # forming static section IS the pre-freeze snapshot — just lock it in,
         # no per-symbol history needed (that matters a lot for a big universe).
-        if not self._need_refreeze and self._boot_ist.time() < freeze_time:
+        if (
+            self._rebuild is None
+            and not self._need_refreeze
+            and self._boot_ist.time() < freeze_time
+        ):
             with self._lock:
                 have = sum(1 for r in self.rows.values() if r.s_high is not None)
                 if have:
@@ -323,10 +335,24 @@ class ScannerService:
                 return
             # nothing forming (socket was down / holiday) -> fall through to history
 
+        # Mid-day rebuild: reconstruct the pre-freeze OHLC from 1-min history,
+        # a chunk per pass, rate-limited, so a ~2000-symbol universe doesn't
+        # blow the Fyers limit. Progressively usable — freeze once most are in.
+        self._rebuild_step(auth, symbols, cutoff)
+
+    def _rebuild_step(self, auth: str, symbols: list[str], cutoff: int) -> None:
+        if self._rebuild is None:
+            self._rebuild = {"todo": list(symbols), "tries": {}, "ok": 0, "t0": time.time()}
+            log.info("static rebuild started for %d symbols (history)", len(symbols))
+        rb = self._rebuild
+        chunk = rb["todo"][:REBUILD_CHUNK]
+        rb["todo"] = rb["todo"][REBUILD_CHUNK:]
+        if not chunk:
+            return
+
         computed: dict[str, tuple] = {}
-        t0 = time.time()
         with ThreadPoolExecutor(max_workers=FREEZE_WORKERS) as ex:
-            futures = [ex.submit(self._freeze_one, auth, s, cutoff) for s in symbols]
+            futures = [ex.submit(self._freeze_one, auth, s, cutoff) for s in chunk]
             for fut in as_completed(futures):
                 if self._stop.is_set():
                     ex.shutdown(cancel_futures=True)
@@ -334,31 +360,41 @@ class ScannerService:
                 sym, val = fut.result()
                 if val is not None:
                     computed[sym] = val
-        log.info(
-            "freeze history: %d/%d symbols in %.0fs",
-            len(computed), len(symbols), time.time() - t0,
-        )
-
-        # No pre-freeze candles for anything -> not a real trading session
-        # (market holiday, or history not available yet). Don't freeze; stay
-        # in "forming" mode showing the last quotes and retry next tick.
-        if not computed:
-            log.info("freeze skipped - no 1-minute history before %s",
-                     freeze_time.strftime("%H:%M"))
-            return
 
         with self._lock:
-            for sym, row in self.rows.items():
-                if sym in computed:
-                    row.s_open, row.s_high, row.s_low, row.s_ltp = computed[sym]
+            for sym, val in computed.items():
+                row = self.rows.get(sym)
+                if row is None:
+                    continue
+                row.s_open, row.s_high, row.s_low, row.s_ltp = val
                 row.s_pct = _pct(row.s_ltp, row.yclose)
                 row.live_pct = _pct(row.ltp, row.s_high)
-            self.frozen_at = datetime.now(IST)
-            self._need_refreeze = False
-        log.info(
-            "static section frozen at %s (%d/%d from history)",
-            self.frozen_at.strftime("%H:%M:%S"), len(computed), len(symbols),
-        )
+        rb["ok"] += len(computed)
+
+        for sym in chunk:
+            if sym in computed:
+                continue
+            rb["tries"][sym] = rb["tries"].get(sym, 0) + 1
+            if rb["tries"][sym] < REBUILD_MAX_TRIES:
+                rb["todo"].append(sym)
+
+        covered = rb["ok"]
+        total = len(symbols)
+        if self.frozen_at is None and covered >= 0.6 * total:
+            with self._lock:
+                self.frozen_at = datetime.now(IST)
+            log.info("static section frozen (rebuild %d/%d, still filling)", covered, total)
+
+        if not rb["todo"]:
+            with self._lock:
+                if self.frozen_at is None:
+                    self.frozen_at = datetime.now(IST)
+                self._need_refreeze = False
+            log.info(
+                "static rebuild complete: %d/%d in %.0fs",
+                covered, total, time.time() - rb["t0"],
+            )
+            self._rebuild = None
 
     def _recompute_live(self) -> None:
         with self._lock:

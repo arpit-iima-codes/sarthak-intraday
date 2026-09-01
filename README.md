@@ -57,10 +57,16 @@ One background service in the web process (hence a single uvicorn worker) owns
 one Fyers data websocket.
 
 - **Static columns** (Symbol, Y.Close, Open, High, Low, LTP, % ↑ close): frozen
-  at the configured **freeze time** (default 10:00 IST, set on `/controls`),
-  computed from Fyers 1-minute history so a mid-day restart still reconstructs
-  the snapshot. Before then they show the forming values. Changing the freeze
-  time re-captures the snapshot for the new time.
+  at the configured **freeze time** (default 10:00 IST, set on `/controls`).
+  Normally the running feed already has the pre-freeze values, so the freeze is
+  instant regardless of universe size. A mid-day restart instead reconstructs
+  the snapshot from Fyers 1-minute history — chunked and rate-limited
+  (`FREEZE_RATE`), so a ~2000-symbol universe takes several minutes and
+  freezes progressively (usable at ~60% coverage). Changing the freeze time
+  re-captures for the new time.
+- **Universe** lives in `data/controls.json`; edit on `/controls`. Currently
+  ~1,160 NSE equities (the high-volume liquid set; symbols Fyers doesn't quote
+  as `NSE:…-EQ` are dropped).
 - **Live columns** (LTP, % ↑ 10:00-high): updated from socket ticks.
 - In-memory only; resets each trading day. Nothing persisted.
 - Browser gets a Server-Sent-Events stream (`/api/scanner/stream`, ~1s);
