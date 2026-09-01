@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from datetime import time as time_cls
 
@@ -31,9 +32,27 @@ log = logging.getLogger("scanner")
 
 STALE_FEED_SECONDS = 90        # no ticks this long while connected -> rebuild
 SEED_INTERVAL = 5             # seconds between pre-freeze quote refreshes
-HISTORY_THROTTLE = 0.15       # seconds between history calls during freeze
+FREEZE_WORKERS = 5           # parallel 1-min-history fetches during a rebuild
+FREEZE_RATE = 5             # ...capped to this many history calls/sec (Fyers limit)
 SUBSCRIBE_BATCH = 500        # symbols per subscribe/unsubscribe call
 SUBSCRIBE_PAUSE = 0.3        # seconds between subscribe batches (server breathing room)
+
+
+class _RateGate:
+    """Spread calls across threads to at most `per_sec` per second."""
+
+    def __init__(self, per_sec: float) -> None:
+        self._min = 1.0 / per_sec
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            sleep_for = self._next - now
+            self._next = max(now, self._next) + self._min
+        if sleep_for > 0:
+            time.sleep(sleep_for)
 
 
 def _pct(value: float | None, base: float | None) -> float | None:
@@ -80,6 +99,8 @@ class ScannerService:
         self.freeze_time: time_cls = FREEZE_TIME
         self.day: date | None = None
         self.frozen_at: datetime | None = None
+        self._boot_ist = datetime.now(IST)   # were we up before the freeze time?
+        self._freeze_gate = _RateGate(FREEZE_RATE)
         self._need_refreeze = False       # freeze time moved into the past
         self._last_seed = 0.0
         self._data_epoch = 0.0            # last-trade time seen in quotes/ticks
@@ -187,7 +208,10 @@ class ScannerService:
         now = time.time()
         if now - self._last_seed < SEED_INTERVAL:
             return
-        forming = self._forming()
+        # Only do the heavy full-universe seed while genuinely pre-freeze; once
+        # the freeze time has passed just top up any missing yesterday-close
+        # (a post-freeze rebuild reconstructs OHLC from history, not quotes).
+        forming = self._forming() and datetime.now(IST).time() < self.freeze_time
         with self._lock:
             if forming:
                 need = list(self.rows)
@@ -239,6 +263,29 @@ class ScannerService:
                     row.s_pct = _pct(row.s_ltp, row.yclose)
                 row.live_pct = _pct(row.ltp, row.s_high)
 
+    def _freeze_one(self, auth: str, sym: str, cutoff: int):
+        """Fetch one symbol's pre-freeze OHLC. Returns (sym, (o,h,l,c)) or (sym, None)."""
+        candles = None
+        for attempt in range(5):
+            self._freeze_gate.wait()
+            try:
+                candles = marketdata.history_1m(auth, sym, self.day)
+                break
+            except marketdata.MarketDataError as exc:
+                if attempt == 4:
+                    log.warning("freeze history failed for %s: %s", sym, exc)
+                    return sym, None
+                time.sleep(0.5 * (attempt + 1))   # transient / rate-limit backoff
+        pre = [c for c in (candles or []) if c and c[0] < cutoff]
+        if not pre:
+            return sym, None
+        return sym, (
+            pre[0][1],
+            max(c[2] for c in pre),
+            min(c[3] for c in pre),
+            pre[-1][4],
+        )
+
     def _maybe_freeze(self) -> None:
         now = datetime.now(IST)
         freeze_time = self.freeze_time
@@ -257,23 +304,40 @@ class ScannerService:
             datetime.combine(self.day, freeze_time, tzinfo=IST).timestamp()
         )
 
-        computed: dict[str, tuple] = {}
-        for sym in symbols:
-            if self._stop.is_set():
+        # Fast path: if we were already running before the freeze time, the
+        # forming static section IS the pre-freeze snapshot — just lock it in,
+        # no per-symbol history needed (that matters a lot for a big universe).
+        if not self._need_refreeze and self._boot_ist.time() < freeze_time:
+            with self._lock:
+                have = sum(1 for r in self.rows.values() if r.s_high is not None)
+                if have:
+                    for row in self.rows.values():
+                        row.s_pct = _pct(row.s_ltp, row.yclose)
+                        row.live_pct = _pct(row.ltp, row.s_high)
+                    self.frozen_at = datetime.now(IST)
+            if have:
+                log.info(
+                    "static section frozen at %s (live snapshot, %d/%d symbols)",
+                    self.frozen_at.strftime("%H:%M:%S"), have, len(symbols),
+                )
                 return
-            try:
-                candles = marketdata.history_1m(auth, sym, self.day)
-            except marketdata.MarketDataError as exc:
-                log.warning("freeze history failed for %s: %s", sym, exc)
-                continue
-            pre = [c for c in candles if c and c[0] < cutoff]
-            if pre:
-                o = pre[0][1]
-                h = max(c[2] for c in pre)
-                low = min(c[3] for c in pre)
-                close = pre[-1][4]
-                computed[sym] = (o, h, low, close)
-            time.sleep(HISTORY_THROTTLE)
+            # nothing forming (socket was down / holiday) -> fall through to history
+
+        computed: dict[str, tuple] = {}
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=FREEZE_WORKERS) as ex:
+            futures = [ex.submit(self._freeze_one, auth, s, cutoff) for s in symbols]
+            for fut in as_completed(futures):
+                if self._stop.is_set():
+                    ex.shutdown(cancel_futures=True)
+                    return
+                sym, val = fut.result()
+                if val is not None:
+                    computed[sym] = val
+        log.info(
+            "freeze history: %d/%d symbols in %.0fs",
+            len(computed), len(symbols), time.time() - t0,
+        )
 
         # No pre-freeze candles for anything -> not a real trading session
         # (market holiday, or history not available yet). Don't freeze; stay
