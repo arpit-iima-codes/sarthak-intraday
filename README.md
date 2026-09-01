@@ -59,11 +59,12 @@ one Fyers data websocket.
 - **Static columns** (Symbol, Y.Close, Open, High, Low, LTP, % ↑ close): frozen
   at the configured **freeze time** (default 10:00 IST, set on `/controls`).
   Normally the running feed already has the pre-freeze values, so the freeze is
-  instant regardless of universe size. A mid-day restart instead reconstructs
-  the snapshot from Fyers 1-minute history — chunked and rate-limited
-  (`FREEZE_RATE`), so a ~2000-symbol universe takes several minutes and
-  freezes progressively (usable at ~60% coverage). Changing the freeze time
-  re-captures for the new time.
+  instant regardless of universe size. The frozen snapshot is written to
+  `data/scanner_freeze.json`, so a **restart reloads it instantly** — no
+  re-fetch. Only when there's no snapshot for today (first freeze, or the
+  freeze time changed) does it reconstruct from Fyers 1-minute history —
+  chunked and rate-limited (`FREEZE_RATE`), several minutes for a large
+  universe, usable progressively at ~60% coverage.
 - **Universe** lives in `data/controls.json`; edit on `/controls`. Currently
   ~1,160 NSE equities (the high-volume liquid set; symbols Fyers doesn't quote
   as `NSE:…-EQ` are dropped).
