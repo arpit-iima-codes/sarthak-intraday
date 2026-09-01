@@ -55,7 +55,7 @@
     unreal.className = "stat-val " + dir(p.unrealised);
 
     const c = d.counts || {};
-    $("eng-slots").textContent = `${c.open ?? "—"}/${c.max_positions ?? "—"}`;
+    $("eng-slots").textContent = `Open ${c.open ?? "—"} / ${c.max_positions ?? "—"}`;
     $("eng-free").textContent = d.capital ? "₹" + inr(d.capital.free) : "—";
 
     const pend = d.pending || [];
