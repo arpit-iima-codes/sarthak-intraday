@@ -230,6 +230,8 @@ class ScannerService:
                 for s, r in self.rows.items()
                 if r.s_high is not None
             }
+            if not static:
+                return   # nothing worth persisting (don't clobber a good file)
             payload = {
                 "day": self.day.isoformat(),
                 "freeze_time": self.freeze_time.strftime("%H:%M"),
@@ -389,13 +391,16 @@ class ScannerService:
             datetime.combine(self.day, freeze_time, tzinfo=IST).timestamp()
         )
 
-        # Fast path: if we were already running before the freeze time, the
-        # forming static section IS the pre-freeze snapshot — just lock it in,
-        # no per-symbol history needed (that matters a lot for a big universe).
+        # Fast path: if the process has been running continuously since before
+        # today's freeze time, the forming static section IS the pre-freeze
+        # snapshot — just lock it in, no per-symbol history (matters a lot for a
+        # big universe). Compare full datetimes, not just the clock time, so a
+        # process that's been up since yesterday still qualifies.
+        freeze_dt = datetime.combine(now.date(), freeze_time, tzinfo=IST)
         if (
             self._rebuild is None
             and not self._need_refreeze
-            and self._boot_ist.time() < freeze_time
+            and self._boot_ist < freeze_dt
         ):
             with self._lock:
                 have = sum(1 for r in self.rows.values() if r.s_high is not None)
@@ -412,6 +417,16 @@ class ScannerService:
                 self._save_freeze()
                 return
             # nothing forming (socket was down / holiday) -> fall through to history
+
+        # A live feed is proof the token works. If it's been dead a while, a
+        # history rebuild would just fail every call (expired token) — defer
+        # starting one until the feed is back rather than burn attempts.
+        if (
+            self._rebuild is None
+            and self.sock_last_msg
+            and time.time() - self.sock_last_msg > 120
+        ):
+            return
 
         # Mid-day rebuild: reconstruct the pre-freeze OHLC from 1-min history,
         # a chunk per pass, rate-limited, so a ~2000-symbol universe doesn't
@@ -464,14 +479,23 @@ class ScannerService:
             log.info("static section frozen (rebuild %d/%d, still filling)", covered, total)
 
         if not rb["todo"]:
+            elapsed = time.time() - rb["t0"]
+            if covered < 0.5 * total:
+                # near-total failure — almost always an expired Fyers token or a
+                # dead feed. Don't "freeze" on nothing; drop the attempt and let
+                # the next pass retry once the token / feed is back.
+                log.warning(
+                    "static rebuild aborted: only %d/%d reconstructed in %.0fs "
+                    "(Fyers token expired or history unavailable?) - will retry",
+                    covered, total, elapsed,
+                )
+                self._rebuild = None
+                return
             with self._lock:
                 if self.frozen_at is None:
                     self.frozen_at = datetime.now(IST)
                 self._need_refreeze = False
-            log.info(
-                "static rebuild complete: %d/%d in %.0fs",
-                covered, total, time.time() - rb["t0"],
-            )
+            log.info("static rebuild complete: %d/%d in %.0fs", covered, total, elapsed)
             self._rebuild = None
 
         # persist progress so a restart resumes instead of re-fetching
