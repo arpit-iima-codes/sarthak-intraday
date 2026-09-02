@@ -105,7 +105,7 @@ class ScannerService:
         self.freeze_time: time_cls = FREEZE_TIME
         self.day: date | None = None
         self.frozen_at: datetime | None = None
-        self._boot_ist = datetime.now(IST)   # were we up before the freeze time?
+        self._first_tick_ist: datetime | None = None   # first live tick today
         self._freeze_gate = _RateGate(FREEZE_RATE)
         self._rebuild: dict | None = None   # in-progress mid-day history rebuild
         self._need_refreeze = False       # freeze time moved into the past
@@ -205,6 +205,7 @@ class ScannerService:
             self.day = today
             self.frozen_at = None
             self._rebuild = None
+            self._first_tick_ist = None
             self._last_seed = 0.0
             self._data_epoch = 0.0
             self._session_date = None
@@ -391,16 +392,19 @@ class ScannerService:
             datetime.combine(self.day, freeze_time, tzinfo=IST).timestamp()
         )
 
-        # Fast path: if the process has been running continuously since before
-        # today's freeze time, the forming static section IS the pre-freeze
-        # snapshot — just lock it in, no per-symbol history (matters a lot for a
-        # big universe). Compare full datetimes, not just the clock time, so a
-        # process that's been up since yesterday still qualifies.
+        # Fast path: if the live feed was already flowing before today's freeze
+        # time, the forming static section IS the pre-freeze snapshot — lock it
+        # in, no per-symbol history (matters a lot for a big universe). Needs
+        # the *feed* (not just the process) up before the freeze — a token that
+        # only started working after 10:00 would give post-10:00 highs.
         freeze_dt = datetime.combine(now.date(), freeze_time, tzinfo=IST)
+        feed_before_freeze = (
+            self._first_tick_ist is not None and self._first_tick_ist < freeze_dt
+        )
         if (
             self._rebuild is None
             and not self._need_refreeze
-            and self._boot_ist < freeze_dt
+            and feed_before_freeze
         ):
             with self._lock:
                 have = sum(1 for r in self.rows.values() if r.s_high is not None)
@@ -599,6 +603,8 @@ class ScannerService:
         if not isinstance(msg, dict):
             return
         self.sock_last_msg = time.time()
+        if self._first_tick_ist is None:
+            self._first_tick_ist = datetime.now(IST)
         sym = msg.get("symbol") or msg.get("s")
         if not sym:
             return
