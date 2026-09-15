@@ -84,16 +84,25 @@ def _pct(value: float | None, base: float | None) -> float | None:
 class Row:
     __slots__ = (
         "symbol", "yclose",
-        "s_open", "s_high", "s_low", "s_ltp", "s_pct",
+        "s_open", "s_high", "s_low", "s_ltp",
         "ltp", "live_pct", "last_tick",
     )
 
     def __init__(self, symbol: str) -> None:
         self.symbol = symbol
         self.yclose = None
-        self.s_open = self.s_high = self.s_low = self.s_ltp = self.s_pct = None
+        self.s_open = self.s_high = self.s_low = self.s_ltp = None
         self.ltp = self.live_pct = None
         self.last_tick = 0.0
+
+    @property
+    def s_pct(self) -> float | None:
+        """Yesterday's close -> the frozen price, in %. Derived, because the
+        two inputs land at different times: the static section is rebuilt from
+        history while yclose arrives with a quote or a tick. Computing this at
+        assignment time meant a yclose that showed up afterwards never made it
+        into the number, and the column stayed blank for the session."""
+        return _pct(self.s_ltp, self.yclose)
 
     @property
     def mom_pct(self) -> float | None:
@@ -373,7 +382,6 @@ class ScannerService:
                     row.s_high = v.get("high_price") or row.s_high
                     row.s_low = v.get("low_price") or row.s_low
                     row.s_ltp = v.get("lp") or row.s_ltp
-                    row.s_pct = _pct(row.s_ltp, row.yclose)
                 row.live_pct = _pct(row.ltp, row.s_high)
 
     def _freeze_one(self, auth: str, sym: str, cutoff: int):
@@ -439,7 +447,6 @@ class ScannerService:
                 have = sum(1 for r in self.rows.values() if r.s_high is not None)
                 if have:
                     for row in self.rows.values():
-                        row.s_pct = _pct(row.s_ltp, row.yclose)
                         row.live_pct = _pct(row.ltp, row.s_high)
                     self.frozen_at = datetime.now(IST)
             if have:
@@ -493,7 +500,6 @@ class ScannerService:
                 if row is None:
                     continue
                 row.s_open, row.s_high, row.s_low, row.s_ltp = val
-                row.s_pct = _pct(row.s_ltp, row.yclose)
                 row.live_pct = _pct(row.ltp, row.s_high)
         rb["ok"] += len(computed)
 
@@ -652,7 +658,6 @@ class ScannerService:
                 row.s_high = msg.get("high_price") or row.s_high
                 row.s_low = msg.get("low_price") or row.s_low
                 row.s_ltp = row.ltp
-                row.s_pct = _pct(row.s_ltp, row.yclose)
             row.live_pct = _pct(row.ltp, row.s_high)
 
     @staticmethod
