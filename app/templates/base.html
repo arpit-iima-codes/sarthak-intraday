@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="{{ static_url('style.css') }}">
 </head>
 <body>
   <div class="royal-bg" aria-hidden="true"></div>
@@ -62,7 +62,7 @@
     {% block content %}{% endblock %}
   </main>
 
-  <script src="/static/theme.js"></script>
+  <script src="{{ static_url('theme.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

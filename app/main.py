@@ -137,6 +137,25 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 
 
+def static_url(path: str) -> str:
+    """/static/<path> stamped with the file's mtime.
+
+    StaticFiles sends an ETag but no Cache-Control, so a browser is free to
+    reuse a cached copy without revalidating — which meant a shipped CSS/JS
+    change could sit invisible behind a stale cache until a hard refresh. The
+    stamp changes with the file, so a new version is always a new URL.
+    """
+    rel = path.lstrip("/")
+    try:
+        stamp = int((BASE / "static" / rel).stat().st_mtime)
+    except OSError:
+        return f"/static/{rel}"
+    return f"/static/{rel}?v={stamp}"
+
+
+templates.env.globals["static_url"] = static_url
+
+
 def app_config() -> AppConfig:
     s = get_settings()
     return AppConfig(
