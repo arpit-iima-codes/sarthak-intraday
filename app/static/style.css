@@ -469,6 +469,48 @@ code {
 .sb-sep { color: var(--ink-faint); }
 .sb-dim { color: var(--ink-faint); font-size: 13px; }
 .sb-right { display: flex; gap: 8px; flex-wrap: wrap; }
+.sb-mid { display: flex; align-items: center; }
+
+/* Momentum / Full Universe switch */
+.viewtabs {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--input-bg);
+}
+.viewtab {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.viewtab:hover { color: var(--ink-dim); }
+.viewtab.is-on {
+  background: var(--gold-soft);
+  color: var(--gold-bright);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.viewtab:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.mom-note {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+  padding: 9px 13px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.mom-note-warn { color: var(--gold-bright); border-left-color: var(--gold); }
 
 .linkbtn {
   background: none;

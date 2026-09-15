@@ -28,6 +28,12 @@ DEFAULTS: dict = {
     "engine_max_positions": 3,         # max simultaneous open positions
     "engine_style": "bracket",         # bracket (target/stop) | eod (hold to close)
     "engine_square_off": "15:15",      # IST HH:MM — force-exit / stop new entries
+
+    # --- tradable universe: today's strongest movers ---
+    # Only stocks that ran at least min_pct from the open to the freeze high
+    # are tradable, and only the best `top` of them.
+    "engine_momentum_top": 10,         # how many symbols the engine may trade
+    "engine_momentum_min_pct": 5.0,    # minimum open -> freeze-high gain, %
 }
 
 ENGINE_STYLES = ("bracket", "eod")
@@ -133,6 +139,23 @@ def parse_engine(form: dict) -> tuple[dict, list[str]]:
         out["engine_square_off"] = parse_freeze_time(form.get("engine_square_off", ""))
     except ValueError as exc:
         errors.append(f"Square-off time — {exc}.")
+
+    try:
+        mt = int(float(form.get("engine_momentum_top")))
+        if mt < 1:
+            raise ValueError
+        out["engine_momentum_top"] = mt
+    except (TypeError, ValueError):
+        errors.append("Momentum shortlist must be a whole number of at least 1.")
+
+    # 0 is allowed: it means "rank them all, don't require a minimum move"
+    try:
+        mm = round(float(form.get("engine_momentum_min_pct")), 2)
+        if mm < 0:
+            raise ValueError
+        out["engine_momentum_min_pct"] = mm
+    except (TypeError, ValueError):
+        errors.append("Minimum momentum % must be 0 or more.")
 
     if errors:
         return {}, errors

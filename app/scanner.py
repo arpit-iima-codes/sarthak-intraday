@@ -61,6 +61,20 @@ class _RateGate:
             time.sleep(sleep_for)
 
 
+def momentum_settings() -> tuple[int, float]:
+    """(how many to shortlist, the minimum open->freeze gain in %)."""
+    cfg = controls.load()
+    try:
+        top = max(1, int(cfg.get("engine_momentum_top", 10)))
+    except (TypeError, ValueError):
+        top = 10
+    try:
+        floor = float(cfg.get("engine_momentum_min_pct", 5.0))
+    except (TypeError, ValueError):
+        floor = 5.0
+    return top, floor
+
+
 def _pct(value: float | None, base: float | None) -> float | None:
     if value is None or not base:
         return None
@@ -81,6 +95,13 @@ class Row:
         self.ltp = self.live_pct = None
         self.last_tick = 0.0
 
+    @property
+    def mom_pct(self) -> float | None:
+        """Open -> freeze-high move, in %. Derived rather than stored so it is
+        right whichever path filled the static section (quotes, ticks, a
+        history rebuild or a restored snapshot)."""
+        return _pct(self.s_high, self.s_open)
+
     def as_dict(self) -> dict:
         return {
             "symbol": self.symbol,
@@ -89,6 +110,7 @@ class Row:
             "s_high": self.s_high,
             "s_low": self.s_low,
             "s_pct": self.s_pct,   # s_ltp is kept internally (feeds s_pct) but not sent
+            "mom_pct": self.mom_pct,
             "ltp": self.ltp,
             "live_pct": self.live_pct,
         }
@@ -687,6 +709,28 @@ class ScannerService:
     def is_frozen(self) -> bool:
         return self.frozen_at is not None
 
+    def momentum_universe(self) -> list[str]:
+        """Today's tradable shortlist: the strongest movers from the open into
+        the freeze, best first.
+
+        Only symbols that gained at least ``engine_momentum_min_pct`` between
+        the day's open and the frozen 10:00 high qualify, and only the top
+        ``engine_momentum_top`` of those. Empty until the static section is
+        frozen - before that the high is still forming and a ranking off it
+        would be noise.
+        """
+        if self.frozen_at is None:
+            return []
+        top, floor = momentum_settings()
+        with self._lock:
+            ranked = [
+                (r.mom_pct, s) for s, r in self.rows.items()
+                if r.mom_pct is not None and r.mom_pct >= floor
+            ]
+        # symbol breaks a tie, so the shortlist is stable across reads
+        ranked.sort(key=lambda t: (-t[0], t[1]))
+        return [s for _, s in ranked[:top]]
+
     def quote_map(self) -> dict[str, tuple[float | None, float | None]]:
         """{symbol: (frozen 10:00 high, live LTP)} — one cheap locked read."""
         with self._lock:
@@ -711,6 +755,7 @@ class ScannerService:
             data_date = datetime.fromtimestamp(self._data_epoch, IST).date().isoformat()
         else:
             data_date = None
+        mom_top, mom_floor = momentum_settings()
         return {
             "server_time": now.isoformat(),
             "day": self.day.isoformat() if self.day else None,
@@ -728,6 +773,11 @@ class ScannerService:
                 "attempts": self.sock_attempts,
             },
             "universe_count": len(rows),
+            # the engine's tradable shortlist, best first - the Momentum view
+            # renders exactly this, so screen and engine can never disagree
+            "momentum": self.momentum_universe(),
+            "momentum_top": mom_top,
+            "momentum_min_pct": mom_floor,
             "rows": rows,
         }
 

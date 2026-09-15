@@ -263,8 +263,17 @@ class BuyEngine:
     def _scan_entries(self, cfg: dict, qmap: dict, prev_ltp: dict) -> None:
         open_syms = {p["symbol"] for p in self.positions if p["status"] == "open"}
 
+        # Only today's strongest movers are tradable — the shortlist is empty
+        # until the static section freezes, which is also when a 10:00 high
+        # exists to break out of.
+        # (no early return on an empty shortlist - anything already queued
+        # still has to be filled or dropped below)
+        tradable = set(scanner.momentum_universe())
+
         # 1. queue every fresh upward cross of the 10:00 high
         for sym, (s_high, ltp) in qmap.items():
+            if sym not in tradable:
+                continue
             if s_high is None or ltp is None:
                 continue
             if sym in self.traded or sym in self.pending or sym in open_syms:

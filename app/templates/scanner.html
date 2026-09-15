@@ -13,6 +13,14 @@
         <span class="sb-sep">·</span>
         <span id="daylabel" class="sb-dim">--</span>
       </div>
+      <div class="sb-mid">
+        <div class="viewtabs" id="viewtabs" role="tablist" aria-label="Scanner view">
+          <button type="button" class="viewtab is-on" id="tab-momentum" role="tab" data-view="momentum"
+                  title="Only the stocks the engine may trade today">Momentum</button>
+          <button type="button" class="viewtab" id="tab-all" role="tab" data-view="all"
+                  title="Every symbol in your universe">Full Universe</button>
+        </div>
+      </div>
       <div class="sb-right">
         <button id="resetcols" class="linkbtn" type="button" title="Reset column order">↺ layout</button>
         <span id="freeze" class="chip chip-dim">static: forming</span>
@@ -26,6 +34,8 @@
          starts tracking them from market open and freezes the static section at
          <strong id="freezetime">10:00</strong>.</p>
     </div>
+
+    <div id="momnote" class="mom-note" hidden></div>
 
     <div id="tablewrap" class="table-wrap" hidden>
       <p class="table-hint">Drag column headers to reorder · click to sort</p>

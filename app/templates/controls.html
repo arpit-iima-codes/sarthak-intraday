@@ -155,6 +155,21 @@
       </div>
     </div>
 
+    <div class="field-row">
+      <div class="field">
+        <label for="engine_momentum_top">Tradable shortlist (top N)</label>
+        <input id="engine_momentum_top" name="engine_momentum_top" type="number" min="1" step="1"
+               value="{{ cfg.engine_momentum_top }}" required>
+        <span class="hint">Only this many of the day's strongest movers can be traded.</span>
+      </div>
+      <div class="field">
+        <label for="engine_momentum_min_pct">Minimum momentum %</label>
+        <input id="engine_momentum_min_pct" name="engine_momentum_min_pct" type="number" min="0" step="0.1"
+               value="{{ cfg.engine_momentum_min_pct }}" required>
+        <span class="hint">Gain from the open to the {{ cfg.freeze_time }} high. 0 ranks everything.</span>
+      </div>
+    </div>
+
     <label class="check">
       <input type="checkbox" name="engine_arm_next_session" value="on"
              {{ 'checked' if cfg.engine_arm_next_session }}>

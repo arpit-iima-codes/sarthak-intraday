@@ -15,12 +15,14 @@
     { k: "s_high",   label: "High",           grp: "static", cls: "num" },
     { k: "s_low",    label: "Low",            grp: "static", cls: "num" },
     { k: "s_pct",    label: "% ↑ close", grp: "static", cls: "num pct" },
+    { k: "mom_pct",  label: "% open→high", grp: "static", cls: "num pct" },
     { k: "ltp",      label: "LTP",            grp: "live",   cls: "num live" },
     { k: "live_pct", label: "% ↑ 10:00 high", grp: "live", cls: "num live pct" },
   ];
   const BY_KEY = Object.fromEntries(COLS.map((c) => [c.k, c]));
   const ALL_KEYS = COLS.map((c) => c.k);
-  const LS_KEY = "scanner.colorder.v2";
+  const LS_KEY = "scanner.colorder.v3";   // v3 adds the momentum column
+  const LS_VIEW = "scanner.view";
 
   function loadOrder() {
     try {
@@ -48,6 +50,13 @@
   let clockBase = null;
   let dragging = false;
   let freezeLabel = "10:00";
+  let view = (() => {
+    try {
+      return localStorage.getItem(LS_VIEW) === "all" ? "all" : "momentum";
+    } catch {
+      return "momentum";
+    }
+  })();
 
   // --- formatting -----------------------------------------------------
   const num = (v, d = 2) =>
@@ -150,14 +159,56 @@
   }
 
   // --- rows ---------------------------------------------------------
+  // --- momentum view ---------------------------------------------------
+  // "momentum" shows only what the engine may trade today; "all" is the whole
+  // universe. The shortlist is computed server-side and shipped in the
+  // snapshot, so this view and the engine can never disagree.
+  function renderMomNote(all, shown) {
+    const note = $("momnote");
+    if (!note) return;
+    if (view !== "momentum" || !all.length) {
+      note.hidden = true;
+      return;
+    }
+    const at = latest.freeze_time || freezeLabel;
+    const top = latest.momentum_top;
+    const floor = latest.momentum_min_pct;
+    if (!latest.frozen) {
+      note.textContent =
+        `The ${at} high is still forming, so today's movers aren't ranked yet. ` +
+        `Switch to Full Universe to watch all ${all.length} symbols meanwhile.`;
+      note.className = "mom-note";
+    } else if (!shown.length) {
+      note.textContent =
+        `Nothing gained ${floor}% or more from the open to the ${at} high today, ` +
+        `so the engine has nothing to trade.`;
+      note.className = "mom-note mom-note-warn";
+    } else {
+      note.textContent =
+        `Top ${top} movers that gained at least ${floor}% from the open to the ${at} high` +
+        ` — ${shown.length} qualified. The engine can only buy these.`;
+      note.className = "mom-note";
+    }
+    note.hidden = false;
+  }
+
   function renderRows() {
     if (!latest) return;
-    const rows = latest.rows || [];
-    const has = rows.length > 0;
-    tableWrap.hidden = !has;
-    emptyEl.hidden = has;
-    if (!has) return;
+    const all = latest.rows || [];
+    const hasUniverse = all.length > 0;
+    emptyEl.hidden = hasUniverse;
 
+    let rows = all;
+    if (view === "momentum") {
+      const keep = new Set(latest.momentum || []);
+      rows = all.filter((r) => keep.has(r.symbol));
+    }
+    renderMomNote(all, rows);
+
+    tableWrap.hidden = !(hasUniverse && rows.length);
+    if (!rows.length) return;
+
+    rows = rows.slice();
     rows.sort((a, b) => {
       let x = a[sortKey], y = b[sortKey];
       if (sortKey === "symbol") return sortDir * disp(x).localeCompare(disp(y));
@@ -252,6 +303,26 @@
   }
   setInterval(tickClock, 1000);
   tickClock();
+
+  // --- view tabs -------------------------------------------------------
+  function syncTabs() {
+    for (const el of document.querySelectorAll(".viewtab")) {
+      const on = el.dataset.view === view;
+      el.classList.toggle("is-on", on);
+      el.setAttribute("aria-selected", on ? "true" : "false");
+    }
+  }
+  for (const el of document.querySelectorAll(".viewtab")) {
+    el.addEventListener("click", () => {
+      view = el.dataset.view === "all" ? "all" : "momentum";
+      try {
+        localStorage.setItem(LS_VIEW, view);
+      } catch {}
+      syncTabs();
+      renderRows();
+    });
+  }
+  syncTabs();
 
   // --- reset layout --------------------------------------------------
   $("resetcols").addEventListener("click", () => {
