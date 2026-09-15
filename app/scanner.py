@@ -138,6 +138,10 @@ class ScannerService:
 
         self._sock: data_ws.FyersDataSocket | None = None
         self._subscribed: set[str] = set()
+        # symbols the feed refuses (delisted / renamed) - kept out of the
+        # subscription so they stop churning the socket, cleared on a universe
+        # edit or a new day
+        self._bad_symbols: set[str] = set()
         self._resub_pending = threading.Event()   # universe/connection changed
         self.sock_status = "idle"      # idle|no-credentials|connecting|connected|disconnected|stale|error
         self.sock_since = time.time()
@@ -173,6 +177,8 @@ class ScannerService:
         self.universe = list(controls.load().get("universe", []))
         new_freeze = self._load_freeze_time()
         with self._lock:
+            # a corrected ticker deserves another try
+            self._bad_symbols.clear()
             for sym in self.universe:
                 self.rows.setdefault(sym, Row(sym))
             for sym in list(self.rows):
@@ -232,6 +238,7 @@ class ScannerService:
             self._data_epoch = 0.0
             self._session_date = None
             self._session_checked = 0.0
+            self._bad_symbols.clear()   # re-test yesterday's rejects
             self.rows = {sym: Row(sym) for sym in self.universe}
         # yesterday's snapshot is stale now
         try:
@@ -648,7 +655,36 @@ class ScannerService:
                 row.s_pct = _pct(row.s_ltp, row.yclose)
             row.live_pct = _pct(row.ltp, row.s_high)
 
+    @staticmethod
+    def _invalid_symbols(msg) -> list[str]:
+        """Symbols the server refused, from a -300 'valid symbol' complaint."""
+        if not isinstance(msg, dict):
+            return []
+        bad = msg.get("invalid_symbols")
+        if isinstance(bad, str):
+            bad = [bad]
+        return [str(s) for s in bad] if isinstance(bad, list) else []
+
     def _on_error(self, msg) -> None:
+        bad = self._invalid_symbols(msg)
+        if bad:
+            # The server rejecting a few tickers is NOT a connection failure.
+            # Treating it as one tore down a healthy socket on every resubscribe
+            # and reopened it, so the feed never lived long enough to deliver a
+            # tick. Drop them instead and keep the connection. A universe edit
+            # or a new day clears the list, so a corrected symbol is retried.
+            with self._lock:
+                fresh = [s for s in bad if s not in self._bad_symbols]
+                self._bad_symbols.update(bad)
+                for sym in bad:
+                    self.rows.pop(sym, None)
+                    self._subscribed.discard(sym)
+            if fresh:
+                log.warning(
+                    "dropping %d symbol(s) the feed rejected: %s",
+                    len(fresh), ", ".join(sorted(fresh)),
+                )
+            return
         log.warning("socket error: %s", msg)
         self._set_status("error")
 
@@ -675,7 +711,7 @@ class ScannerService:
         if sock is None or self.sock_status != "connected":
             return
         with self._lock:
-            wanted = set(self.rows)
+            wanted = set(self.rows) - self._bad_symbols
         add = sorted(wanted - self._subscribed)
         remove = sorted(self._subscribed - wanted)
 
