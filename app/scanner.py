@@ -36,6 +36,8 @@ log = logging.getLogger("scanner")
 
 STALE_FEED_SECONDS = 90        # no ticks this long while connected -> rebuild
 SEED_INTERVAL = 5             # seconds between pre-freeze quote refreshes
+SEED_MAX_SYMBOLS = 250        # per pass (5 quote requests) - the rest next tick
+SEED_BACKOFF_MAX = 120        # seconds; ceiling when the broker is throttling
 FREEZE_WORKERS = 4           # parallel 1-min-history fetches during a rebuild
 FREEZE_RATE = 3             # ...capped to this many history calls/sec (Fyers limit)
 REBUILD_CHUNK = 60          # symbols reconstructed per scheduler pass
@@ -141,6 +143,7 @@ class ScannerService:
         self._rebuild: dict | None = None   # in-progress mid-day history rebuild
         self._need_refreeze = False       # freeze time moved into the past
         self._last_seed = 0.0
+        self._seed_interval = SEED_INTERVAL   # grows while the broker throttles
         self._data_epoch = 0.0            # last-trade time seen in quotes/ticks
         self._session_date: date | None = None   # last session with data
         self._session_checked = 0.0
@@ -244,6 +247,7 @@ class ScannerService:
             self._rebuild = None
             self._first_tick_ist = None
             self._last_seed = 0.0
+            self._seed_interval = SEED_INTERVAL
             self._data_epoch = 0.0
             self._session_date = None
             self._session_checked = 0.0
@@ -328,7 +332,7 @@ class ScannerService:
     def _seed_from_quotes(self) -> None:
         """Fill yesterday's close and, before the freeze, the forming OHLC."""
         now = time.time()
-        if now - self._last_seed < SEED_INTERVAL:
+        if now - self._last_seed < self._seed_interval:
             return
         # Only do the heavy full-universe seed while genuinely pre-freeze; once
         # the freeze time has passed just top up any missing yesterday-close
@@ -341,16 +345,31 @@ class ScannerService:
                 need = [s for s, r in self.rows.items() if r.yclose is None]
         if not need:
             self._last_seed = now
+            self._seed_interval = SEED_INTERVAL
             return
         auth = self._auth()
         if not auth:
             return
+        # A whole universe is 20+ requests back to back, which is what trips the
+        # broker's rate limit. Take a slice per pass; the rest follow on later
+        # ticks, since a symbol stays in `need` until its yclose lands.
+        need = need[:SEED_MAX_SYMBOLS]
+        # Stamp the attempt *before* the call: the old code returned early on
+        # failure without stamping, so a throttled sweep was retried on the very
+        # next 3s tick - which kept it throttled indefinitely.
+        self._last_seed = now
         try:
             quotes = marketdata.quotes(auth, need)
-        except marketdata.MarketDataError as exc:
-            log.warning("seed quotes failed: %s", exc)
+        except marketdata.RateLimited as exc:
+            self._seed_interval = min(SEED_BACKOFF_MAX, max(SEED_INTERVAL, self._seed_interval) * 2)
+            log.warning("seed quotes throttled (%s) - backing off to %ds",
+                        exc, self._seed_interval)
             return
-        self._last_seed = now
+        except marketdata.MarketDataError as exc:
+            self._seed_interval = min(SEED_BACKOFF_MAX, max(SEED_INTERVAL, self._seed_interval) * 2)
+            log.warning("seed quotes failed: %s - retrying in %ds", exc, self._seed_interval)
+            return
+        self._seed_interval = SEED_INTERVAL
         epochs = [
             int(v["tt"])
             for v in quotes.values()
