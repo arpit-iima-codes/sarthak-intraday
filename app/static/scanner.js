@@ -192,11 +192,53 @@
     note.hidden = false;
   }
 
+  // --- rebuild progress ------------------------------------------------
+  // Present while a mid-day history reconstruction is running (a restart, or
+  // recovery after the feed/token was down). Blocks the table entirely until
+  // frozen (data isn't trustworthy yet); after that it's just a background
+  // fill and the table is already usable, so the note shrinks to a strip.
+  function renderRebuild() {
+    const card = $("rebuilding");
+    const fill = $("fillnote");
+    if (!card || !fill) return;
+    const rb = latest.rebuild;
+    if (!rb) {
+      card.hidden = true;
+      fill.hidden = true;
+      return;
+    }
+    const pct = rb.total ? Math.min(100, Math.round((rb.done / rb.total) * 100)) : 0;
+    const mins = rb.elapsed_s ? Math.floor(rb.elapsed_s / 60) : 0;
+    const doneStr = rb.done.toLocaleString("en-IN");
+    const totalStr = rb.total.toLocaleString("en-IN");
+    if (!latest.frozen) {
+      card.hidden = false;
+      fill.hidden = true;
+      $("rebuild-bar-fill").style.width = pct + "%";
+      $("rebuild-meta").textContent =
+        `${doneStr} / ${totalStr} symbols · ${pct}%` + (mins ? ` · ${mins}m elapsed` : "");
+    } else {
+      card.hidden = true;
+      fill.hidden = false;
+      fill.textContent =
+        `Still filling in the rest of the universe in the background — ${doneStr} / ${totalStr} done (${pct}%).`;
+    }
+  }
+
   function renderRows() {
     if (!latest) return;
     const all = latest.rows || [];
     const hasUniverse = all.length > 0;
-    emptyEl.hidden = hasUniverse;
+    const blockedByRebuild = !!latest.rebuild && !latest.frozen;
+
+    renderRebuild();
+    emptyEl.hidden = hasUniverse || blockedByRebuild;
+
+    if (blockedByRebuild) {
+      tableWrap.hidden = true;
+      $("momnote").hidden = true;
+      return;
+    }
 
     let rows = all;
     if (view === "momentum") {
@@ -267,6 +309,11 @@
       const t = s.frozen_at ? new Date(s.frozen_at).toLocaleTimeString("en-GB") : "";
       fz.textContent = "static: " + (sess ? sess + " session · " : "") + "frozen " + t;
       fz.className = "chip chip-ok";
+    } else if (s.rebuild) {
+      const rb = s.rebuild;
+      const pct = rb.total ? Math.round((rb.done / rb.total) * 100) : 0;
+      fz.textContent = `static: rebuilding ${rb.done}/${rb.total} (${pct}%)`;
+      fz.className = "chip chip-warn";
     } else if (sess && s.data_stale) {
       fz.textContent = "static: " + sess + " session · forms " + s.freeze_time;
       fz.className = "chip chip-warn";

@@ -35,6 +35,18 @@
          <strong id="freezetime">10:00</strong>.</p>
     </div>
 
+    <div id="rebuilding" class="card card-muted rebuild-card" hidden>
+      <div class="rebuild-spin" aria-hidden="true"></div>
+      <div class="rebuild-copy">
+        <h2>Rebuilding today's 10:00 snapshot</h2>
+        <p>Reconstructing each symbol's pre-freeze high from 1-minute history —
+           the table appears once enough of the universe is in.</p>
+        <div class="rebuild-bar"><div class="rebuild-bar-fill" id="rebuild-bar-fill"></div></div>
+        <p class="rebuild-meta" id="rebuild-meta">—</p>
+      </div>
+    </div>
+
+    <div id="fillnote" class="mom-note" hidden></div>
     <div id="momnote" class="mom-note" hidden></div>
 
     <div id="tablewrap" class="table-wrap" hidden>

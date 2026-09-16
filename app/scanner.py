@@ -803,6 +803,16 @@ class ScannerService:
         now = datetime.now(IST)
         with self._lock:
             rows = [r.as_dict() for r in self.rows.values()]
+            rb = self._rebuild
+            rebuild = (
+                {
+                    "done": rb["ok"],
+                    "total": len(self.rows),
+                    "elapsed_s": round(time.time() - rb["t0"]),
+                }
+                if rb is not None
+                else None
+            )
         last_msg = (
             round(time.time() - self.sock_last_msg) if self.sock_last_msg else None
         )
@@ -824,6 +834,9 @@ class ScannerService:
             "freeze_time": self.freeze_time.strftime("%H:%M"),
             "frozen": self.frozen_at is not None,
             "frozen_at": self.frozen_at.isoformat() if self.frozen_at else None,
+            # present only while a mid-day history reconstruction is running;
+            # None once it's finished (or was never needed today)
+            "rebuild": rebuild,
             "market_open": MARKET_OPEN <= now.time() <= MARKET_CLOSE
             and now.weekday() < 5,
             "socket": {
