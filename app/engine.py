@@ -71,7 +71,6 @@ class BuyEngine:
         self.pending: list[str] = []         # broke out, waiting for a slot / capital
         self.errors: list[dict] = []         # recent order failures, for the UI
         self._prev_ltp: dict[str, float] = {}  # LTP seen on the previous tick
-        self._known_high: set[str] = set()   # symbols whose 10:00 high we've seen
 
     # ------------------------------------------------------------------ #
     # lifecycle
@@ -109,10 +108,6 @@ class BuyEngine:
             self.traded = set(data.get("traded", []))
             self.pending = list(data.get("pending", []))
             self.errors = list(data.get("errors", []))
-            # without this, every tradable symbol already above its (already
-            # resolved before the restart) high would look newly-discovered on
-            # the first tick and queue all at once - see _scan_entries
-            self._known_high = set(data.get("known_high", []))
             log.info(
                 "resumed engine state: %d position(s), %d open",
                 len(self.positions),
@@ -129,7 +124,6 @@ class BuyEngine:
         self.pending = []
         self.errors = []
         self._prev_ltp = {}
-        self._known_high = set()
         self._dirty = True
         log.info("engine: new trading day %s (armed=%s)", day, self.armed)
 
@@ -142,7 +136,6 @@ class BuyEngine:
             "positions": self.positions,
             "traded": sorted(self.traded),
             "pending": self.pending,
-            "known_high": sorted(self._known_high),
             "errors": self.errors[-20:],
             "saved_at": datetime.now(IST).isoformat(),
         }
@@ -277,42 +270,20 @@ class BuyEngine:
         # still has to be filled or dropped below)
         tradable = set(scanner.momentum_universe())
 
-        # 1. queue every upward cross of the 10:00 high.
-        #
-        # A history rebuild resolves each symbol's real 10:00 high separately,
-        # one batch at a time, rather than all at once - a fast mover's high
-        # can land minutes after weaker names', by which point price is
-        # already past it. Waiting for a live tick-by-tick cross in that case
-        # means never: there was no earlier tick where s_high existed to be
-        # "below" relative to. So the first tick a symbol's high becomes known
-        # at all, being above it already counts - that's still a true
-        # 10:00-high breakout, we just learned about it late. Tracked
-        # regardless of `tradable` so a symbol whose high resolves before it
-        # ever makes the momentum cut doesn't get treated as newly-discovered
-        # once it does.
+        # 1. queue every fresh upward cross of the 10:00 high
         for sym, (s_high, ltp) in qmap.items():
-            if s_high is None or ltp is None:
-                continue
-            first_known = sym not in self._known_high
-            if first_known:
-                self._known_high.add(sym)
-                self._dirty = True   # persist it now - see _load's known_high note
             if sym not in tradable:
+                continue
+            if s_high is None or ltp is None:
                 continue
             if sym in self.traded or sym in self.pending or sym in open_syms:
                 continue
             prev = prev_ltp.get(sym)
-            crossed = prev is not None and prev <= s_high < ltp
-            fresh_above = first_known and ltp > s_high
-            if crossed or fresh_above:
+            if prev is not None and prev <= s_high < ltp:
                 self.pending.append(sym)
                 self._dirty = True
-                how = (
-                    f"crossed {s_high:.2f} ({prev:.2f} -> {ltp:.2f})"
-                    if crossed
-                    else f"already above its just-resolved high {s_high:.2f} (ltp {ltp:.2f})"
-                )
-                log.info("engine: %s %s - queued", sym, how)
+                log.info("engine: %s crossed 10:00 high %.2f (%.2f -> %.2f) - queued",
+                         sym, s_high, prev, ltp)
 
         if not self.pending:
             return
