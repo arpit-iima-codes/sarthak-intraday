@@ -35,6 +35,7 @@ FREEZE_FILE = DATA_DIR / "scanner_freeze.json"
 log = logging.getLogger("scanner")
 
 STALE_FEED_SECONDS = 90        # no ticks this long while connected -> rebuild
+CONNECT_TIMEOUT = 20           # seconds to wait for sock.connect() before giving up
 SEED_INTERVAL = 5             # seconds between pre-freeze quote refreshes
 SEED_MAX_SYMBOLS = 250        # per pass (5 quote requests) - the rest next tick
 SEED_BACKOFF_MAX = 120        # seconds; ceiling when the broker is throttling
@@ -570,43 +571,49 @@ class ScannerService:
     # ------------------------------------------------------------------ #
     def _socket_loop(self) -> None:
         while not self._stop.is_set():
-            now = datetime.now(IST)
-            in_session = (
-                now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE
-            )
-            auth = self._auth()
-
-            if auth is None:
-                self._teardown_socket("no-credentials")
-                self._stop.wait(5)
-                continue
-            if not in_session:
-                self._teardown_socket("idle")
-                self._stop.wait(20)
-                continue
-
-            if self._sock is None:
-                self._open_socket(auth)
-            elif (
-                self.sock_status == "connected"
-                and self.sock_last_msg
-                and time.time() - self.sock_last_msg > STALE_FEED_SECONDS
-            ):
-                log.warning("feed stale for %ds - rebuilding socket",
-                            STALE_FEED_SECONDS)
-                self._teardown_socket("stale")
-            elif self.sock_status in ("disconnected", "error", "stale"):
-                # SDK gave up / hard error -> back off then rebuild
-                backoff = min(30, 2 ** min(self.sock_attempts, 5))
-                self._stop.wait(backoff)
-                self._teardown_socket(self.sock_status)
-                self._open_socket(auth)
-
-            if self.sock_status == "connected" and self._resub_pending.is_set():
-                self._resub_pending.clear()
-                self._sync_subscription()
-
+            try:
+                self._socket_tick()
+            except Exception:  # noqa: BLE001 - an uncaught exception here used
+                # to kill this thread for good: sock_status froze wherever it
+                # was (once for 40+ hours, attempts stuck at 0) since nothing
+                # ever ran again to notice or recover.
+                log.exception("socket loop tick failed")
+                self._set_status("error")
             self._stop.wait(3)
+
+    def _socket_tick(self) -> None:
+        now = datetime.now(IST)
+        in_session = now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE
+        auth = self._auth()
+
+        if auth is None:
+            self._teardown_socket("no-credentials")
+            self._stop.wait(5)
+            return
+        if not in_session:
+            self._teardown_socket("idle")
+            self._stop.wait(20)
+            return
+
+        if self._sock is None:
+            self._open_socket(auth)
+        elif (
+            self.sock_status == "connected"
+            and self.sock_last_msg
+            and time.time() - self.sock_last_msg > STALE_FEED_SECONDS
+        ):
+            log.warning("feed stale for %ds - rebuilding socket", STALE_FEED_SECONDS)
+            self._teardown_socket("stale")
+        elif self.sock_status in ("disconnected", "error", "stale"):
+            # SDK gave up / hard error -> back off then rebuild
+            backoff = min(30, 2 ** min(self.sock_attempts, 5))
+            self._stop.wait(backoff)
+            self._teardown_socket(self.sock_status)
+            self._open_socket(auth)
+
+        if self.sock_status == "connected" and self._resub_pending.is_set():
+            self._resub_pending.clear()
+            self._sync_subscription()
 
     def _open_socket(self, auth: str) -> None:
         self.sock_attempts += 1
@@ -624,7 +631,30 @@ class ScannerService:
                 on_close=self._on_close,
             )
             self._sock = sock
-            sock.connect()
+            # sock.connect() validates the token against Fyers over HTTP before
+            # ever spawning its websocket thread, with no timeout of its own -
+            # a hung/unresponsive call there has previously frozen this whole
+            # loop for 40+ hours (attempts stuck at 0, status stuck forever,
+            # since nothing after this line ever ran again). Bound it: if it
+            # hasn't returned in CONNECT_TIMEOUT, give up on *this* attempt and
+            # let the loop retry: a slow-but-alive call may still complete and
+            # fire on_connect late (a stray, self-correcting on the next
+            # teardown) rather than wedging the feed indefinitely.
+            done = threading.Event()
+
+            def _do_connect() -> None:
+                try:
+                    sock.connect()
+                finally:
+                    done.set()
+
+            threading.Thread(target=_do_connect, name="ws_connect", daemon=True).start()
+            if not done.wait(timeout=CONNECT_TIMEOUT):
+                log.warning(
+                    "socket connect() did not return within %ss - abandoning this "
+                    "attempt, will retry", CONNECT_TIMEOUT,
+                )
+                self._set_status("error")
         except Exception:  # noqa: BLE001
             log.exception("socket connect failed")
             self._sock = None
