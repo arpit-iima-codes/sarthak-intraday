@@ -561,6 +561,16 @@ async def engine_toggle(request: Request):
     return RedirectResponse("/scanner", status_code=303)
 
 
+@app.post("/engine/close")
+async def engine_close(request: Request, pos_id: str = Form("")):
+    if not await active_session():
+        _flash(request, "Not connected. Please sign in.")
+        return RedirectResponse("/", status_code=303)
+    ok, message = engine.close_position(pos_id)
+    _flash(request, message, "success" if ok else "error")
+    return RedirectResponse("/scanner", status_code=303)
+
+
 # --------------------------------------------------------------------------- #
 # misc
 # --------------------------------------------------------------------------- #

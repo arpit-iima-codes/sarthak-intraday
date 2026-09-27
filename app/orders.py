@@ -17,13 +17,27 @@ API = "https://api-t1.fyers.in/api/v3"
 TIMEOUT = httpx.Timeout(15.0)
 
 SIDE = {"BUY": 1, "SELL": -1}
+_SIDE_NAME = {1: "BUY", -1: "SELL"}
 
 # Fyers order status codes
+_STATUS_CANCELLED = 1
 _STATUS_FILLED = 2
+_STATUS_TRANSIT = 4
 _STATUS_REJECTED = 5
+_STATUS_PENDING = 6
+_STATUS_EXPIRED = 7
+_OPEN_STATUSES = {_STATUS_TRANSIT, _STATUS_PENDING}
+_STATUS_LABEL = {
+    _STATUS_CANCELLED: "cancelled", _STATUS_FILLED: "traded",
+    _STATUS_TRANSIT: "in transit", _STATUS_REJECTED: "rejected",
+    _STATUS_PENDING: "pending", _STATUS_EXPIRED: "expired",
+}
 
 _bal: dict = {"at": 0.0, "value": None}
 _BAL_TTL = 15.0
+
+_ob: dict = {"at": 0.0, "value": []}
+_OB_TTL = 3.0
 
 
 class OrderResult:
@@ -70,6 +84,39 @@ def available_balance(client_id: str, token: str) -> float | None:
     if val is not None:
         _bal.update(at=now, value=val)
     return val if val is not None else _bal["value"]
+
+
+def open_orders(client_id: str, token: str) -> list[dict]:
+    """Orders still open at the broker (transit / pending) — not yet filled,
+    rejected, cancelled or expired. Cached ~3s so a busy UI poll doesn't hammer
+    Fyers; returns the last good list (never raises) if a fetch fails."""
+    now = time.time()
+    if now - _ob["at"] < _OB_TTL:
+        return _ob["value"]
+    try:
+        with httpx.Client(timeout=TIMEOUT, headers=_header(client_id, token)) as c:
+            data = c.get(f"{API}/orders").json()
+    except (httpx.HTTPError, ValueError):
+        return _ob["value"]
+    if data.get("s") != "ok":
+        return _ob["value"]
+
+    rows = []
+    for o in data.get("orderBook") or []:
+        status = o.get("status")
+        if status not in _OPEN_STATUSES:
+            continue
+        rows.append({
+            "id": str(o.get("id") or ""),
+            "symbol": o.get("symbol") or "",
+            "side": _SIDE_NAME.get(o.get("side"), "?"),
+            "qty": o.get("qty"),
+            "price": o.get("limitPrice") or o.get("tradedPrice") or None,
+            "status": _STATUS_LABEL.get(status, str(status)),
+            "at": o.get("orderDateTime"),
+        })
+    _ob.update(at=now, value=rows)
+    return rows
 
 
 def place_market(

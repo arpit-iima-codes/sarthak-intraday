@@ -96,6 +96,33 @@
       </div>
     </div>
 
+    <div class="broker-check" id="broker-check" hidden>
+      <span class="stat-label">Broker P&amp;L (Fyers)</span>
+      <span class="stat-val" id="broker-pnl">—</span>
+      <span class="broker-check-note" id="broker-check-note"></span>
+    </div>
+
+    <div class="pos-head">
+      <span class="eyebrow">Pending Orders</span>
+    </div>
+
+    <div class="ob-wrap">
+      <table class="ob-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Side</th>
+            <th class="col-sym">Symbol</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody id="ob-rows"></tbody>
+      </table>
+      <p class="ob-empty" id="ob-empty" hidden>No pending orders.</p>
+    </div>
+
     <div class="pos-head">
       <span class="eyebrow">Today's Positions</span>
       <span class="pos-open" id="eng-slots">—</span>
@@ -114,6 +141,7 @@
             <th>Stop</th>
             <th>PnL</th>
             <th>Status</th>
+            <th class="col-act"></th>
           </tr>
         </thead>
         <tbody id="pos-rows"></tbody>
@@ -122,6 +150,17 @@
     </div>
   </aside>
 
+</div>
+
+<div class="modal-overlay" id="close-modal" hidden>
+  <div class="modal-card">
+    <h3>Close position?</h3>
+    <p id="close-modal-text">Close this position now, at market?</p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-sm btn-ghost" id="close-modal-cancel">Cancel</button>
+      <button type="button" class="btn btn-sm btn-danger" id="close-modal-confirm">Close position</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 

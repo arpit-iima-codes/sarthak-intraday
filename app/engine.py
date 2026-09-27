@@ -70,6 +70,7 @@ class BuyEngine:
         self.traded: set[str] = set()        # symbols entered today (one-shot)
         self.pending: list[str] = []         # broke out, waiting for a slot / capital
         self.errors: list[dict] = []         # recent order failures, for the UI
+        self.events: list[dict] = []         # signal/buy/sell log, for the mini order book
         self._prev_ltp: dict[str, float] = {}  # LTP seen on the previous tick
 
     # ------------------------------------------------------------------ #
@@ -108,6 +109,7 @@ class BuyEngine:
             self.traded = set(data.get("traded", []))
             self.pending = list(data.get("pending", []))
             self.errors = list(data.get("errors", []))
+            self.events = list(data.get("events", []))
             log.info(
                 "resumed engine state: %d position(s), %d open",
                 len(self.positions),
@@ -123,6 +125,7 @@ class BuyEngine:
         self.traded = set()
         self.pending = []
         self.errors = []
+        self.events = []
         self._prev_ltp = {}
         self._dirty = True
         log.info("engine: new trading day %s (armed=%s)", day, self.armed)
@@ -137,6 +140,7 @@ class BuyEngine:
             "traded": sorted(self.traded),
             "pending": self.pending,
             "errors": self.errors[-20:],
+            "events": self.events[-50:],
             "saved_at": datetime.now(IST).isoformat(),
         }
         try:
@@ -249,8 +253,15 @@ class BuyEngine:
         pos["exit_price"] = round(price, 2)
         pos["exit_at"] = datetime.now(IST).isoformat()
         pos["exit_reason"] = reason
-        pos["fill_confirmed"] = confirmed
+        # NOTE: entry's own "fill_confirmed" is left untouched here — it was being
+        # clobbered by the exit's confirmation before, losing whether the *entry*
+        # fill was ever actually confirmed once a position closed.
+        pos["exit_confirmed"] = confirmed
         pos["pnl"] = round((pos["exit_price"] - pos["entry_price"]) * pos["qty"], 2)
+        self._log_event(
+            "sell", pos["symbol"], qty=pos["qty"], price=pos["exit_price"],
+            mode=pos["mode"], reason=reason, confirmed=confirmed,
+        )
         self._dirty = True
         log.info(
             "engine EXIT %s x%d @ %.2f (%s) pnl=%.2f",
@@ -281,7 +292,7 @@ class BuyEngine:
             prev = prev_ltp.get(sym)
             if prev is not None and prev <= s_high < ltp:
                 self.pending.append(sym)
-                self._dirty = True
+                self._log_event("signal", sym, level=round(s_high, 2), ltp=round(ltp, 2))
                 log.info("engine: %s crossed 10:00 high %.2f (%.2f -> %.2f) - queued",
                          sym, s_high, prev, ltp)
 
@@ -374,7 +385,8 @@ class BuyEngine:
             "target_price": round(entry * (1 + tgt / 100), 2),
             "stop_price": round(entry * (1 - stp / 100), 2),
             "order_id": order_id,
-            "fill_confirmed": confirmed,
+            "fill_confirmed": confirmed,   # entry fill confirmed by the broker
+            "exit_confirmed": None,        # set once the exit order is fired
             "status": "open",
             "exit_price": None,
             "exit_at": None,
@@ -383,7 +395,10 @@ class BuyEngine:
         }
         self.positions.append(pos)
         self.traded.add(sym)
-        self._dirty = True
+        self._log_event(
+            "buy", sym, qty=qty, price=entry, mode=mode,
+            order_id=order_id, confirmed=confirmed,
+        )
         log.info(
             "engine ENTER %s x%d @ %.2f (%s/%s) tgt=%.2f stop=%.2f",
             sym, qty, entry, mode, style, pos["target_price"], pos["stop_price"],
@@ -407,6 +422,31 @@ class BuyEngine:
         self.errors = self.errors[-20:]
         self._dirty = True
         log.warning("engine: %s", message)
+
+    def _log_event(self, kind: str, symbol: str, **fields) -> None:
+        """Append to the mini order book: a signal fires, a buy fires, a sell/close fires."""
+        self.events.append({
+            "at": datetime.now(IST).isoformat(),
+            "kind": kind,          # "signal" | "buy" | "sell"
+            "symbol": symbol,
+            **fields,
+        })
+        self.events = self.events[-50:]
+        self._dirty = True
+
+    def close_position(self, pos_id: str) -> tuple[bool, str]:
+        """Manual close from the UI — same exit path as target/stop/eod."""
+        with self._lock:
+            pos = next(
+                (p for p in self.positions if p["id"] == pos_id and p["status"] == "open"),
+                None,
+            )
+            if pos is None:
+                return False, "Position not found or already closed."
+            ltp = scanner.quote_map().get(pos["symbol"], (None, None))[1]
+            self._exit(pos, ltp, "manual")
+            self._persist(force=True)
+            return True, f"Closed {_disp(pos['symbol'])} @ {pos['exit_price']}."
 
     # ------------------------------------------------------------------ #
     # snapshot for the API
@@ -491,6 +531,9 @@ class BuyEngine:
                 },
                 "positions": positions,
                 "errors": list(reversed(self.errors[-8:])),
+                # pending orders = live broker order book (transit/pending), straight
+                # from Fyers — paper mode has no real broker, so always empty there
+                "pending_orders": orders.open_orders(*auth)[:15] if (live and auth) else [],
             }
 
 
